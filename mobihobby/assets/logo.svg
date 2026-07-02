@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 230" role="img" aria-label="MobiHobby">
+  <!-- Fallback brand lockup (stand-in). The real shop logo goes at assets/logo.png. -->
+  <rect x="8" y="8" width="544" height="150" rx="26" fill="none" stroke="#E8920E" stroke-width="7"/>
+  <path d="M8 34 a26 26 0 0 1 26 -26 h176 v150 h-176 a26 26 0 0 1 -26 -26 Z" fill="#E8920E"/>
+  <text x="120" y="108" font-family="Arial, sans-serif" font-weight="800" font-style="italic" font-size="70" fill="#fff" text-anchor="middle">MH64</text>
+  <g fill="none" stroke="#E8920E" stroke-width="5" stroke-linejoin="round">
+    <path d="M250 118 q6 -34 46 -40 l70 -6 q46 -2 78 26 l40 6 q16 4 18 16"/>
+    <path d="M250 118 h228"/>
+    <path d="M300 80 l58 -4 q30 0 44 20 l14 20"/>
+  </g>
+  <circle cx="320" cy="120" r="20" fill="none" stroke="#E8920E" stroke-width="6"/><circle cx="320" cy="120" r="7" fill="#E8920E"/>
+  <circle cx="452" cy="120" r="20" fill="none" stroke="#E8920E" stroke-width="6"/><circle cx="452" cy="120" r="7" fill="#E8920E"/>
+  <text x="280" y="212" font-family="Arial, sans-serif" font-weight="800" font-size="58" fill="#E8920E" text-anchor="middle">MobiHobby</text>
+</svg>

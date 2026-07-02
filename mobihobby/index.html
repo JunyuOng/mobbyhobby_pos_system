@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>MobiHobby POS</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── CASHIER LOCK SCREEN ── -->
+<div id="cashier-lock">
+  <div class="lock-logo"><img class="mh-logo-full" data-mh-logo alt="MobiHobby"></div>
+  <div class="lock-tagline">Diecast &amp; hobby collectibles</div>
+  <div class="lock-device" id="lock-device-id"></div>
+  <div class="lock-sell-area">
+    <div class="lock-event" id="lock-event-name">No event selected</div>
+    <div class="lock-scan-label">Scan item barcode</div>
+    <div class="lock-scan-wrap">
+      <input class="lock-scan-input" id="lock-scan-input" placeholder="Scan or type barcode…" autocomplete="off" inputmode="numeric" onkeydown="if(event.key==='Enter')lockScan()">
+      <button class="lock-scan-btn" onclick="lockScan()">+</button>
+    </div>
+    <div class="lock-last-scan" id="lock-last-scan">
+      <div id="lock-ls-img"></div>
+      <div style="flex:1;min-width:0"><div class="lock-ls-name" id="lock-ls-name"></div><div class="lock-ls-sub" id="lock-ls-sub"></div></div>
+      <div class="lock-ls-badge" id="lock-ls-badge"></div>
+    </div>
+    <div class="lock-cart-list" id="lock-cart-list"></div>
+    <div class="lock-discount-row">
+      <label>Discount:</label>
+      <button class="lock-disc-type active" id="lock-disc-rm" onclick="lockSetDiscType('rm')">RM</button>
+      <button class="lock-disc-type" id="lock-disc-pct" onclick="lockSetDiscType('pct')">%</button>
+      <input class="lock-disc-input" id="lock-disc-val" type="number" min="0" placeholder="0" inputmode="decimal" oninput="lockRenderTotals()">
+    </div>
+    <div class="lock-mgr-approval" id="lock-mgr-approval">⚠ Over 20% — manager approval needed</div>
+    <div class="lock-saletype-row" id="lock-saletype-row">
+      <label>Sale:</label>
+      <button class="saletype-btn active" data-type="Physical" onclick="setSaleType(true,'Physical')">🏬 Physical</button>
+      <button class="saletype-btn" data-type="Online" onclick="setSaleType(true,'Online')">🌐 Online</button>
+      <span class="saletype-hint" id="lock-saletype-hint"></span>
+    </div>
+    <div class="lock-channel-row" id="lock-platform-row" style="display:none">
+      <label>Platform <span class="ch-req req">• required</span></label>
+      <select class="lock-channel-select" id="lock-platform">
+        <option value="">Select platform…</option>
+        <option>Facebook</option><option>WhatsApp</option><option>Rednote</option><option>Other</option>
+      </select>
+    </div>
+    <input class="lock-customer-input" id="lock-customer" placeholder="Customer name (optional)">
+    <div class="lock-footer">
+      <div>
+        <div class="lock-total-label">Total</div>
+        <div class="lock-total-amount">RM <span id="lock-total">0.00</span></div>
+        <div class="lock-total-sub" id="lock-total-sub"></div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-danger" onclick="lockClearCart()">✕ Clear</button>
+        <button class="btn btn-primary btn-lg" onclick="lockDone()" id="lock-done-btn" style="font-size:14px" disabled>✓ Done</button>
+      </div>
+    </div>
+    <div class="lock-msg" id="lock-msg"></div>
+  </div>
+  <div class="lock-btn-row">
+    <button class="lock-mgr-btn" onclick="openCashierSold()">📋 Sold items</button>
+    <button class="lock-mgr-btn" onclick="requirePin(()=>exitCashierMode())">🔐 Manager mode</button>
+  </div>
+</div>
+
+<!-- Cashier read-only Sold Items overlay -->
+<div id="cashier-sold-overlay">
+  <div id="cashier-sold-box">
+    <div class="cs-head">
+      <div class="cs-title">📋 Sold items <span class="cs-sub">(view only)</span></div>
+      <button class="cs-close" onclick="closeCashierSold()">✕</button>
+    </div>
+    <input class="cs-search" id="cs-search" placeholder="Search name, brand or receipt #…" autocomplete="off" oninput="renderCashierSold(this.value)">
+    <div class="cs-list" id="cs-list"></div>
+  </div>
+</div>
+
+<!-- ── MAIN APP ── -->
+<div class="layout" id="main-app">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="brand"><img class="mh-logo-full" data-mh-logo alt="MobiHobby"></div>
+      <div class="tagline">Diecast &amp; hobby collectibles</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-item" onclick="goTab('sell')"        id="snav-sell">       <span class="nav-icon">⊡</span> Sell</div>
+      <div class="nav-item active" onclick="goTab('inventory')" id="snav-inventory"> <span class="nav-icon">◫</span> Inventory</div>
+      <div class="nav-item" onclick="goTab('addedit')"     id="snav-addedit">    <span class="nav-icon">⊕</span> Add / Edit</div>
+      <div class="nav-item" onclick="goTab('events')"      id="snav-events">     <span class="nav-icon">📅</span> Events</div>
+      <div class="nav-item" onclick="goTab('preorders')"   id="snav-preorders"> <span class="nav-icon">📦</span> Pre-orders</div>
+      <div class="nav-item" onclick="goTab('sold')"        id="snav-sold">       <span class="nav-icon">📋</span> Sold Items</div>
+      <div class="nav-item" onclick="goTab('labels')"      id="snav-labels">     <span class="nav-icon">◈</span> Labels</div>
+      <div class="nav-item" onclick="goTab('importexport')" id="snav-importexport"><span class="nav-icon">⇅</span> Import / Export</div>
+      <div class="nav-item" onclick="goTab('history')"     id="snav-history">    <span class="nav-icon">⊟</span> History</div>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="btn btn-warning btn-sm" onclick="enterCashierMode()" style="width:100%">🔒 Cashier mode</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <img class="mh-logo-mark topbar-logo" data-mh-logo alt="MobiHobby">
+      <span class="topbar-title" id="topbar-title">Inventory</span>
+      <div class="topbar-right">
+        <span id="sync-badge">⚡ Offline</span>
+        <div class="topbar-event" id="topbar-event" onclick="goTab('events')">📅 No event</div>
+        <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()">🌙</button>
+        <button class="lock-btn" onclick="enterCashierMode()">🔒 Lock</button>
+      </div>
+    </div>
+
+    <div class="content" id="content-wrap">
+
+      <!-- SELL -->
+      <div class="panel" id="panel-sell">
+        <div class="sell-event-bar">
+          <span class="sell-event-name" id="sell-event-name">No event selected</span>
+          <button class="btn btn-ghost btn-sm" onclick="goTab('events')">Change</button>
+        </div>
+        <div class="scan-hero">
+          <div class="scan-hero-label">Scan item barcode</div>
+          <div class="scan-wrap">
+            <input class="scan-input" id="sell-input" placeholder="Scan or type barcode…" autocomplete="off" inputmode="numeric" onkeydown="if(event.key==='Enter')scanSell()">
+            <button class="scan-btn" onclick="scanSell()">+</button>
+          </div>
+        </div>
+        <div class="last-scan" id="last-scan">
+          <div id="ls-img-wrap"></div>
+          <div style="flex:1;min-width:0"><div class="ls-name" id="ls-name"></div><div class="ls-sub" id="ls-sub"></div></div>
+          <div class="ls-badge" id="ls-badge"></div>
+        </div>
+        <div id="sell-msg"></div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div class="card-title" style="margin:0">Cart</div>
+            <div style="font-size:12px;color:var(--text-3)" id="cart-meta"></div>
+          </div>
+          <div id="sell-cart-list"><div class="cart-empty"><span class="cart-empty-icon">🛒</span>Scan an item to start</div></div>
+          <div class="cart-footer">
+            <div class="cart-discount-row">
+              <label>Discount:</label>
+              <button class="disc-type-btn active" id="disc-rm" onclick="setDiscType('rm')">RM</button>
+              <button class="disc-type-btn" id="disc-pct" onclick="setDiscType('pct')">%</button>
+              <input class="disc-val-input" id="disc-val" type="number" min="0" placeholder="0" inputmode="decimal" oninput="renderCartTotals()">
+              <span style="font-size:12px;color:var(--text-3)" id="disc-preview"></span>
+            </div>
+            <div class="mgr-approval-warn" id="mgr-approval-warn"></div>
+            <div class="sell-saletype-row" id="sell-saletype-row">
+              <label>Sale:</label>
+              <button class="saletype-btn active" data-type="Physical" onclick="setSaleType(false,'Physical')">🏬 Physical</button>
+              <button class="saletype-btn" data-type="Online" onclick="setSaleType(false,'Online')">🌐 Online</button>
+              <span class="saletype-hint" id="sell-saletype-hint"></span>
+            </div>
+            <div class="sell-channel-row" id="sell-platform-row" style="display:none">
+              <label>Platform <span class="ch-req req">• required</span></label>
+              <select id="sell-platform">
+                <option value="">Select platform…</option>
+                <option>Facebook</option><option>WhatsApp</option><option>Rednote</option><option>Other</option>
+              </select>
+            </div>
+            <div style="margin-bottom:10px">
+              <input id="customer-name" placeholder="Customer name (optional)" style="width:100%;padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--surface)">
+            </div>
+            <div class="cart-totals">
+              <div>
+                <div class="total-label">Total</div>
+                <div class="total-amount">RM <span id="sell-total">0.00</span></div>
+                <div class="subtotal-line" id="subtotal-line"></div>
+              </div>
+              <div class="cart-actions">
+                <button class="btn btn-danger" onclick="clearSellCart()">✕ Clear</button>
+                <button class="btn btn-primary" id="done-btn" onclick="openConfirm()" disabled>✓ Done</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- INVENTORY -->
+      <div class="panel active" id="panel-inventory">
+        <div class="stat-grid" id="stats"></div>
+        <div class="card">
+          <div class="inv-filters">
+            <div class="inv-search-wrap"><input id="inv-q" placeholder="Search name, brand, barcode…" oninput="applyFilters()"></div>
+            <select id="f-brand-filter" onchange="applyFilters()">
+              <option value="">All brands</option>
+              <option>Mini GT</option><option>Hot Wheels</option><option>Kaido House</option>
+              <option>PopRace</option><option>INNO64</option><option>Tarmac Works</option>
+              <option>LCD Models</option><option>PEAKO</option><option>Tomica Limited Vintage</option><option>Other</option>
+            </select>
+            <select id="f-scale-filter" onchange="applyFilters()">
+              <option value="">All scales</option>
+              <option>1:64</option><option>1:43</option><option>1:18</option><option>1:24</option>
+            </select>
+            <select id="f-sort" onchange="applyFilters()">
+              <option value="name-asc">Name A→Z</option><option value="name-desc">Name Z→A</option>
+              <option value="price-asc">Price Low→High</option><option value="price-desc">Price High→Low</option>
+              <option value="stock-asc">Stock Low→High</option><option value="stock-desc">Stock High→Low</option>
+            </select>
+            <button class="btn btn-outline btn-sm" onclick="toggleSelectAll()">☑ Select all</button>
+          </div>
+          <div class="bulk-bar" id="bulk-bar">
+            <span class="bulk-count" id="bulk-count">0 selected</span>
+            <div class="bulk-edit-fields">
+              <input class="bulk-mini-input" id="bulk-price" placeholder="New price" type="number" min="0" step="0.01" inputmode="decimal">
+              <input class="bulk-mini-input" id="bulk-stock" placeholder="Set stock" type="number" min="0" inputmode="numeric">
+              <button class="btn btn-ghost btn-sm" onclick="applyBulkEdit()">✓ Apply</button>
+            </div>
+            <button class="btn btn-danger btn-sm" onclick="requirePin(()=>bulkDelete())">✕ Delete</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="inv-table">
+              <thead><tr>
+                <th><input type="checkbox" class="sel-check" id="chk-all" onchange="selectAllRows(this.checked)"></th>
+                <th></th>
+                <th onclick="cycleSortCol('name')">Product</th>
+                <th onclick="cycleSortCol('brand')">Brand</th>
+                <th onclick="cycleSortCol('price')">Price</th>
+                <th onclick="cycleSortCol('stock')">Stock</th>
+                <th></th>
+              </tr></thead>
+              <tbody id="inv-body"></tbody>
+            </table>
+          </div>
+          <div id="inv-empty" style="display:none"><div class="empty-state"><span class="empty-icon">📦</span><div class="empty-title">No products found</div><div class="empty-sub">Try adjusting filters</div></div></div>
+          <div style="margin-top:10px;font-size:12px;color:var(--text-3)" id="inv-result-count"></div>
+        </div>
+      </div>
+
+      <!-- ADD/EDIT -->
+      <div class="panel" id="panel-addedit">
+        <div class="card">
+          <div class="card-title">Look up existing product</div>
+          <div style="display:flex;gap:10px">
+            <div class="field" style="flex:1;margin:0"><input id="bc-input" placeholder="Scan or type barcode…" onkeydown="if(event.key==='Enter')lookupBarcode()" inputmode="numeric"></div>
+            <button class="btn btn-ghost" onclick="lookupBarcode()">Search</button>
+          </div>
+          <div id="bc-msg"></div>
+        </div>
+        <div class="card">
+          <div class="card-title" id="form-mode-label">New product</div>
+          <div class="field"><label>Barcode</label>
+            <div class="bc-field-wrap">
+              <input id="f-bc" placeholder="Auto-generated" inputmode="numeric">
+              <button class="bc-gen-btn" onclick="genBarcode()" type="button">⟳ Generate</button>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Brand</label>
+              <select id="f-brand">
+                <option>Mini GT</option><option>Hot Wheels</option><option>Kaido House</option>
+                <option>PopRace</option><option>INNO64</option><option>Tarmac Works</option>
+                <option>LCD Models</option><option>PEAKO</option><option>Tomica Limited Vintage</option><option>Other</option>
+              </select>
+            </div>
+            <div class="field"><label>Scale</label>
+              <select id="f-scale"><option>1:64</option><option>1:43</option><option>1:18</option><option>1:24</option></select>
+            </div>
+          </div>
+          <div class="field"><label>Product name</label><input id="f-name" placeholder="e.g. Nissan GT-R R34 – Bayside Blue #55"></div>
+          <div class="field-row">
+            <div class="field"><label>Selling price (RM)</label><input id="f-price" type="number" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
+            <div class="field"><label>Cost price (RM)</label><input id="f-cost" type="number" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
+          </div>
+          <div class="field"><label>Stock qty</label><input id="f-stock" type="number" placeholder="1" min="0" inputmode="numeric"></div>
+          <div class="field"><label>Product photo</label>
+            <div class="img-upload" id="img-box">
+              <span class="upload-icon">📷</span>
+              <span style="font-size:13px">Tap to upload photo</span>
+              <div class="upload-overlay">Change photo</div>
+              <input type="file" accept="image/*" onchange="handleImg(this)">
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="saveProduct()">✓ Save</button>
+            <button class="btn btn-danger" id="delete-btn" style="display:none" onclick="requirePin(()=>deleteFromForm())">✕ Delete</button>
+            <button class="btn btn-outline" onclick="clearForm()">Clear</button>
+          </div>
+          <div id="save-msg"></div>
+        </div>
+      </div>
+
+      <!-- EVENTS -->
+      <div class="panel" id="panel-events">
+        <div class="card">
+          <div class="card-title">Create new event</div>
+          <div class="field-row">
+            <div class="field"><label>Event name</label><input id="ev-name" placeholder="e.g. Hobbycon KL June 2026" onkeydown="if(event.key==='Enter')createNewEvent()"></div>
+            <div class="field"><label>Date</label><input id="ev-date" type="date"></div>
+          </div>
+          <div class="field"><label>Location (optional)</label><input id="ev-loc" placeholder="e.g. Pavilion KL"></div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="createNewEvent()">+ Create event</button>
+          </div>
+          <div id="ev-msg"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Your events</div>
+          <div id="event-list"><div class="empty-state"><span class="empty-icon">📅</span><div class="empty-title">No events yet</div></div></div>
+        </div>
+      </div>
+
+      <!-- SOLD ITEMS -->
+      <div class="panel" id="panel-sold">
+        <div class="card">
+          <div class="card-title">Sold items — tap restore to add back to cart</div>
+          <div id="sold-list"></div>
+          <div id="sold-msg"></div>
+        </div>
+      </div>
+
+      <!-- LABELS -->
+      <div class="panel" id="panel-labels">
+        <div class="card">
+          <div class="card-title">Label sheet — 36 per A4 (50mm × 30mm) · auto-paginates</div>
+          <div class="label-search"><input placeholder="Search products…" oninput="filterLabelList(this.value)"></div>
+          <div class="label-toolbar">
+            <button class="btn btn-ghost btn-sm" onclick="selectAllLabels(true)">Select all</button>
+            <button class="btn btn-outline btn-sm" onclick="selectAllLabels(false)">Clear all</button>
+            <span class="label-badge" id="label-badge">0 labels</span>
+            <button class="btn btn-primary btn-sm" onclick="printLabelSheet()" style="margin-left:auto">🖨 Print</button>
+          </div>
+          <div class="label-list" id="label-list"></div>
+        </div>
+        <div class="card" style="background:var(--blue-ice);border-color:var(--blue-border)">
+          <div style="font-size:13px;color:var(--text-2);line-height:1.8">
+            <strong style="color:var(--blue)">Tip:</strong> Qty defaults to stock count. Labels auto-paginate across multiple A4 sheets if over 36.<br>
+            Chrome: <strong>A4 · Portrait · No scaling (100%)</strong>.
+          </div>
+        </div>
+      </div>
+
+      <!-- IMPORT/EXPORT -->
+      <div class="panel" id="panel-importexport">
+        <div class="card">
+          <div class="card-title">Export to CSV</div>
+          <p style="font-size:13px;color:var(--text-2);margin-bottom:14px">Downloads all products. Scale formatted as text (Excel-safe). Includes cost price column.</p>
+          <button class="btn btn-primary" onclick="exportCSV()">⬇ Download CSV</button>
+        </div>
+        <div class="card">
+          <div class="card-title">Import from CSV</div>
+          <p style="font-size:13px;color:var(--text-2);margin-bottom:12px">Columns: <strong>Name, Brand, Scale, Price, Stock</strong>. Barcode auto-generated if missing. Scale defaults to <strong>1:64</strong>.</p>
+          <div class="import-drop" id="import-drop">
+            <span class="import-drop-icon">📂</span>
+            <div style="font-weight:600;color:var(--text);margin-bottom:4px">Drop CSV here or tap to browse</div>
+            <div style="font-size:12px;color:var(--text-3)">.csv files only</div>
+            <input type="file" accept=".csv,text/csv" onchange="handleCSVImport(this)">
+          </div>
+          <div id="import-preview"></div>
+          <div id="import-msg"></div>
+          <div id="import-actions" style="display:none;margin-top:12px">
+            <div class="btn-row">
+              <button class="btn btn-primary" onclick="confirmImport()">✓ Import <span id="import-count"></span> products</button>
+              <button class="btn btn-outline" onclick="cancelImport()">Cancel</button>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Security — PIN</div>
+          <p style="font-size:13px;color:var(--text-2);margin-bottom:4px">Manager PIN protects: delete, bulk delete, clear history, delete event, cashier exit, and discounts over 20%.</p>
+          <p style="font-size:13px;color:var(--text-3)">PIN is managed centrally. Contact your administrator to change it.</p>
+        </div>
+      </div>
+
+      <!-- HISTORY -->
+      <div class="panel" id="panel-history">
+        <div class="stat-grid" id="hist-stats"></div>
+        <div class="hist-mode-row" id="hist-mode-row" style="display:flex;gap:6px;margin-bottom:10px">
+          <button class="saletype-btn active" data-mode="events" onclick="setHistMode('events')">📅 Event sales</button>
+          <button class="saletype-btn" data-mode="online" onclick="setHistMode('online')">🌐 Online sales</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+          <select id="hist-event-filter" onchange="renderHistory();renderHistStats()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-pill);font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--surface);appearance:none;flex:1">
+            <option value="">All events</option>
+          </select>
+          <select id="hist-platform-filter" onchange="renderHistory();renderHistStats()" style="display:none;padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-pill);font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--surface);appearance:none;flex:1">
+            <option value="">All platforms</option>
+          </select>
+          <button class="btn btn-danger btn-sm" onclick="requirePin(()=>clearHistory())">🗑 Clear</button>
+        </div>
+        <div class="card">
+          <div id="hist-body"></div>
+          <div id="sales-empty" style="display:none"><div class="empty-state"><span class="empty-icon">🧾</span><div class="empty-title">No sales yet</div></div></div>
+        </div>
+      </div>
+
+      <!-- PRE-ORDERS (V2) -->
+      <div class="panel" id="panel-preorders">
+        <div class="po-toolbar">
+          <button class="btn btn-primary btn-sm" onclick="openPoBatch()">＋ New Batch</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('po-import-file').click()">⬆ Import</button>
+          <button class="btn btn-outline btn-sm" onclick="openExport()">⬇ Export</button>
+          <button class="btn btn-outline btn-sm" onclick="archiveCompletedBatches()">🗄 Archive completed</button>
+          <button class="btn btn-outline btn-sm" id="po-arch-toggle" onclick="togglePoArchived()">🗄 Archived</button>
+          <input type="file" id="po-import-file" accept=".json,application/json" style="display:none" onchange="poImport(this)">
+        </div>
+        <div class="stat-grid" id="po-dash"></div>
+        <div class="po-section-title" id="po-models-title">Models</div>
+        <div class="po-models" id="po-models"></div>
+        <div class="po-board">
+          <div class="po-left card">
+            <div class="po-section-title" style="margin-top:0">Customers</div>
+            <input class="po-search" id="po-search" placeholder="Search name / phone…" autocomplete="off" oninput="renderPoCustomers(this.value)">
+            <div class="po-customer-list" id="po-customer-list"></div>
+          </div>
+          <div class="po-right card" id="po-detail"></div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+
+    <!-- Bottom nav mobile (5 tabs) -->
+    <div class="bottom-nav">
+      <div class="bottom-tabs">
+        <div class="tab-item" onclick="goTab('sell')"      id="bnav-sell">      <span class="tab-icon">⊡</span><span>Sell</span><span class="tab-pip"></span></div>
+        <div class="tab-item active" onclick="goTab('inventory')" id="bnav-inventory"><span class="tab-icon">◫</span><span>Stock</span><span class="tab-pip"></span></div>
+        <div class="tab-item" onclick="goTab('addedit')"   id="bnav-addedit">   <span class="tab-icon">⊕</span><span>Add</span><span class="tab-pip"></span></div>
+        <div class="tab-item" onclick="goTab('sold')"      id="bnav-sold">      <span class="tab-icon">📋</span><span>Sold</span><span class="tab-pip"></span></div>
+        <div class="tab-item" onclick="goTab('history')"   id="bnav-history">   <span class="tab-icon">⊟</span><span>History</span><span class="tab-pip"></span></div>
+      </div>
+    </div>
+  </div><!-- /main -->
+</div><!-- /layout -->
+
+<!-- PIN overlay -->
+<div class="overlay-bg" id="pin-overlay">
+  <div class="overlay-box">
+    <div class="overlay-title" id="pin-title">Enter PIN</div>
+    <div class="overlay-sub"   id="pin-sub">Enter your 4-digit PIN</div>
+    <div class="pin-dots" id="pin-dots">
+      <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
+      <div class="pin-dot" id="pd2"></div><div class="pin-dot" id="pd3"></div>
+    </div>
+    <div id="pin-err" style="text-align:center;font-size:13px;color:var(--danger);min-height:20px;margin-bottom:8px"></div>
+    <div class="pin-pad">
+      <button class="pin-key" onclick="pinPress('1')">1</button><button class="pin-key" onclick="pinPress('2')">2</button><button class="pin-key" onclick="pinPress('3')">3</button>
+      <button class="pin-key" onclick="pinPress('4')">4</button><button class="pin-key" onclick="pinPress('5')">5</button><button class="pin-key" onclick="pinPress('6')">6</button>
+      <button class="pin-key" onclick="pinPress('7')">7</button><button class="pin-key" onclick="pinPress('8')">8</button><button class="pin-key" onclick="pinPress('9')">9</button>
+      <button class="pin-key" onclick="cancelPin()" style="font-size:13px;color:var(--text-2)">Cancel</button>
+      <button class="pin-key" onclick="pinPress('0')">0</button>
+      <button class="pin-key del" onclick="pinBackspace()">⌫</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm sale overlay -->
+<div id="confirm-overlay">
+  <div id="confirm-box">
+    <div class="confirm-title">Confirm sale</div>
+    <div class="confirm-sub">Review before finalising — stock deducts on confirm</div>
+    <div id="confirm-context"></div>
+    <div id="confirm-items"></div>
+    <hr class="confirm-divider">
+    <div id="confirm-discount-row"></div>
+    <div class="confirm-total">
+      <span class="confirm-total-label">Total</span>
+      <span class="confirm-total-amount">RM <span id="confirm-total-amount"></span></span>
+    </div>
+    <div class="confirm-actions">
+      <button class="btn btn-outline" onclick="closeConfirm()">← Edit</button>
+      <button class="btn btn-primary" onclick="completeSell()" style="flex:2">✓ Confirm &amp; complete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Receipt overlay -->
+<div id="receipt-overlay">
+  <div id="receipt-box">
+    <div class="r-logo">MobiHobby</div>
+    <div class="r-sub">Diecast &amp; hobby collectibles</div>
+    <div class="r-meta"     id="r-meta"></div>
+    <div id="r-event-tag"></div>
+    <div id="r-channel-tag"></div>
+    <div id="r-customer"></div>
+    <hr class="r-divider">
+    <div id="r-items"></div>
+    <hr class="r-divider">
+    <div id="r-discount-row"></div>
+    <div class="r-total-row">
+      <span class="r-total-label">Total</span>
+      <span class="r-total-amount">RM <span id="r-total"></span></span>
+    </div>
+    <div class="r-thanks">Thank you for your purchase! 🙏</div>
+    <div class="r-actions">
+      <button class="btn btn-outline" onclick="closeReceipt()">Close</button>
+      <button class="btn btn-ghost" onclick="copyReceipt(this)">📋 Copy</button>
+      <button class="btn btn-primary" onclick="newSale()">+ New sale</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ PRE-ORDER MODALS ══ -->
+<div class="po-ovl" id="po-batch-modal"><div class="po-modal">
+  <h3 class="po-modal-h">New preorder batch</h3>
+  <div class="field"><label>Product image</label>
+    <div class="po-upload" id="po-img-box"></div>
+  </div>
+  <div class="field-row">
+    <div class="field"><label>Brand</label>
+      <select id="po-b-brand"><option>Mini GT</option><option>Hot Wheels</option><option>Kaido House</option><option>PopRace</option><option>INNO64</option><option>Tarmac Works</option><option>LCD Models</option><option>PEAKO</option><option>Tomica Limited Vintage</option><option>Other</option></select></div>
+    <div class="field"><label>ETA</label><input id="po-b-eta" placeholder="e.g. July 2026"></div>
+  </div>
+  <div class="field"><label>Model name</label><input id="po-b-name" placeholder="e.g. Mini GT R34 Z-Tune"></div>
+  <div class="field-row">
+    <div class="field"><label>Selling price (RM)</label><input id="po-b-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+    <div class="field"><label>Required deposit (RM)</label><input id="po-b-deposit" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+  </div>
+  <div class="field"><label>Notes (optional)</label><input id="po-b-notes" placeholder="optional"></div>
+  <div id="po-b-msg"></div>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('po-batch-modal')">Cancel</button><button class="btn btn-primary" onclick="createPoBatch()">＋ Create batch</button></div>
+</div></div>
+
+<div class="po-ovl" id="po-cust-modal"><div class="po-modal">
+  <h3 class="po-modal-h" id="po-cust-title">Add customer</h3>
+  <div class="field-row">
+    <div class="field"><label>Name</label><input id="po-c-name" placeholder="John Tan"></div>
+    <div class="field"><label>Phone</label><input id="po-c-phone" inputmode="tel" placeholder="012-3456789"></div>
+  </div>
+  <div class="field-row">
+    <div class="field"><label>Platform</label><select id="po-c-platform"><option>WhatsApp</option><option>Facebook</option><option>Instagram</option><option>Walk-in</option></select></div>
+    <div class="field"><label>Quantity</label><input id="po-c-qty" type="number" min="1" value="1" inputmode="numeric"></div>
+  </div>
+  <div class="field"><label>Shipping address (optional)</label><textarea id="po-c-address" rows="2" placeholder="House no, street, postcode, city"></textarea></div>
+  <div class="field-row">
+    <div class="field"><label>Deposit paid (RM)</label><input id="po-c-deposit" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+    <div class="field"><label>Notes (optional)</label><input id="po-c-notes" placeholder="optional"></div>
+  </div>
+  <div id="po-c-msg"></div>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('po-cust-modal')">Cancel</button><button class="btn btn-primary" onclick="addCustomerToBatch()">＋ Add preorder</button></div>
+</div></div>
+
+<div class="po-ovl" id="po-edit-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Edit customer</h3>
+  <div class="field-row">
+    <div class="field"><label>Name</label><input id="po-e-name"></div>
+    <div class="field"><label>Phone</label><input id="po-e-phone" inputmode="tel"></div>
+  </div>
+  <div class="field"><label>Platform</label><select id="po-e-platform"><option>WhatsApp</option><option>Facebook</option><option>Instagram</option><option>Walk-in</option></select></div>
+  <div class="field"><label>Shipping address</label><textarea id="po-e-address" rows="2"></textarea></div>
+  <div class="field"><label>Notes</label><input id="po-e-notes"></div>
+  <div class="po-modal-actions"><button class="btn btn-danger" onclick="deletePoCustomer()">🗑 Delete</button><button class="btn btn-outline" onclick="poClose('po-edit-modal')">Cancel</button><button class="btn btn-primary" onclick="saveEditCustomer()">Save</button></div>
+</div></div>
+
+<div class="po-ovl" id="po-receive-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Receive stock</h3><div class="po-modal-sub" id="po-rec-sub"></div>
+  <div class="field"><label>Total units received (editable)</label><input id="po-rec-qty" type="number" min="0" inputmode="numeric" placeholder="0"></div>
+  <div class="po-note">This is the running total received — adjust it up or down any time. Spare stock is banked and auto-allocates to the longest-waiting orders (FIFO), including customers added later.</div>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('po-receive-modal')">Cancel</button><button class="btn btn-primary" onclick="doReceiveStock()">Save &amp; allocate</button></div>
+</div></div>
+
+<div class="po-ovl" id="po-notify-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Notify customers</h3><div class="po-modal-sub" id="po-notify-sub"></div>
+  <div class="po-notify-list" id="po-notify-list"></div>
+  <div class="po-modal-actions"><button class="btn btn-primary" onclick="poClose('po-notify-modal')" style="flex:1">Done</button></div>
+</div></div>
+
+<div class="po-ovl" id="po-invoice-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Invoice preview</h3><div class="po-modal-sub" id="po-inv-sub"></div>
+  <pre class="po-invoice" id="po-inv-text"></pre>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('po-invoice-modal')">Close</button><button class="btn btn-primary" onclick="copyInvoice(this)">📋 Copy Invoice</button></div>
+</div></div>
+
+<div class="po-ovl" id="po-post-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Pre-order post</h3><div class="po-modal-sub">Ready to paste into Facebook / WhatsApp / Instagram.</div>
+  <pre class="po-invoice" id="po-post-text"></pre>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('po-post-modal')">Close</button><button class="btn btn-primary" onclick="copyPost(this)">📋 Copy post</button></div>
+</div></div>
+
+<div class="po-ovl" id="po-item-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Edit preorder</h3>
+  <div class="frow">
+    <div class="field"><label>Quantity</label><input id="po-it-qty" type="number" min="1" inputmode="numeric"></div>
+    <div class="field"><label>Deposit paid (RM)</label><input id="po-it-deposit" type="number" min="0" step="0.01" inputmode="decimal"></div>
+  </div>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('po-item-modal')">Cancel</button><button class="btn btn-primary" onclick="saveEditItem()">Save</button></div>
+</div></div>
+
+<div class="po-ovl" id="po-export-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Export pre-orders</h3><div class="po-modal-sub">Includes customers, models, deposits, statuses, ETA.</div>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poExportJSON()">⬇ JSON (full backup)</button><button class="btn btn-primary" onclick="poExportCSV()">⬇ CSV (Excel)</button></div>
+  <div class="po-modal-actions" style="margin-top:8px"><button class="btn btn-ghost" onclick="poClose('po-export-modal')" style="flex:1">Cancel</button></div>
+</div></div>
+
+<div class="po-ovl po-ovl-top" id="po-confirm"><div class="po-modal po-modal-sm">
+  <div class="po-confirm-msg" id="po-confirm-msg"></div>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poConfirmNo()">Cancel</button><button class="btn btn-primary" onclick="poConfirmYes()">Confirm</button></div>
+</div></div>
+
+<div class="po-toast" id="po-toast"><span id="po-toast-msg"></span><button class="po-toast-btn" id="po-toast-undo">↶ Undo</button></div>
+
+<script src="sync.js"></script>
+<script src="app.js"></script>
+<script>
+  // set device ID display
+  document.addEventListener('DOMContentLoaded', () => {
+    const d = document.getElementById('lock-device-id');
+    if (d) d.textContent = 'Device: ' + (localStorage.getItem('mh_device_id') || '—');
+  });
+</script>
+</body>
+</html>

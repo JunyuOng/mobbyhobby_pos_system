@@ -86,15 +86,14 @@
       <div class="tagline">Diecast &amp; hobby collectibles</div>
     </div>
     <nav class="sidebar-nav">
-      <div class="nav-item" onclick="goTab('sell')"        id="snav-sell">       <span class="nav-icon">⊡</span> Sell</div>
-      <div class="nav-item active" onclick="goTab('inventory')" id="snav-inventory"> <span class="nav-icon">◫</span> Inventory</div>
-      <div class="nav-item" onclick="goTab('addedit')"     id="snav-addedit">    <span class="nav-icon">⊕</span> Add / Edit</div>
-      <div class="nav-item" onclick="goTab('events')"      id="snav-events">     <span class="nav-icon">📅</span> Events</div>
-      <div class="nav-item" onclick="goTab('preorders')"   id="snav-preorders"> <span class="nav-icon">📦</span> Pre-orders</div>
-      <div class="nav-item" onclick="goTab('sold')"        id="snav-sold">       <span class="nav-icon">📋</span> Sold Items</div>
-      <div class="nav-item" onclick="goTab('labels')"      id="snav-labels">     <span class="nav-icon">◈</span> Labels</div>
-      <div class="nav-item" onclick="goTab('importexport')" id="snav-importexport"><span class="nav-icon">⇅</span> Import / Export</div>
-      <div class="nav-item" onclick="goTab('history')"     id="snav-history">    <span class="nav-icon">⊟</span> History</div>
+      <div class="nav-item" onclick="goTab('sell')"        id="snav-sell">Sell</div>
+      <div class="nav-item active" onclick="goTab('inventory')" id="snav-inventory">Inventory</div>
+      <div class="nav-item" onclick="goTab('events')"      id="snav-events">Events</div>
+      <div class="nav-item" onclick="goTab('preorders')"   id="snav-preorders">Pre-orders</div>
+      <div class="nav-item" onclick="goTab('sold')"        id="snav-sold">Sold Items</div>
+      <div class="nav-item" onclick="goTab('labels')"      id="snav-labels">Labels</div>
+      <div class="nav-item" onclick="goTab('importexport')" id="snav-importexport">Import / Export</div>
+      <div class="nav-item" onclick="goTab('history')"     id="snav-history">History</div>
     </nav>
     <div class="sidebar-footer">
       <button class="btn btn-warning btn-sm" onclick="enterCashierMode()" style="width:100%">🔒 Cashier mode</button>
@@ -184,6 +183,10 @@
       <div class="panel active" id="panel-inventory">
         <div class="stat-grid" id="stats"></div>
         <div class="card">
+          <div class="inv-toolbar">
+            <button class="btn btn-primary btn-sm" onclick="openAddProduct()">＋ Add Item</button>
+            <button class="btn btn-outline btn-sm" onclick="exportCSV()">⬇ Export Inventory</button>
+          </div>
           <div class="inv-filters">
             <div class="inv-search-wrap"><input id="inv-q" placeholder="Search name, brand, barcode…" oninput="applyFilters()"></div>
             <select id="f-brand-filter" onchange="applyFilters()">
@@ -228,59 +231,6 @@
           </div>
           <div id="inv-empty" style="display:none"><div class="empty-state"><span class="empty-icon">📦</span><div class="empty-title">No products found</div><div class="empty-sub">Try adjusting filters</div></div></div>
           <div style="margin-top:10px;font-size:12px;color:var(--text-3)" id="inv-result-count"></div>
-        </div>
-      </div>
-
-      <!-- ADD/EDIT -->
-      <div class="panel" id="panel-addedit">
-        <div class="card">
-          <div class="card-title">Look up existing product</div>
-          <div style="display:flex;gap:10px">
-            <div class="field" style="flex:1;margin:0"><input id="bc-input" placeholder="Scan or type barcode…" onkeydown="if(event.key==='Enter')lookupBarcode()" inputmode="numeric"></div>
-            <button class="btn btn-ghost" onclick="lookupBarcode()">Search</button>
-          </div>
-          <div id="bc-msg"></div>
-        </div>
-        <div class="card">
-          <div class="card-title" id="form-mode-label">New product</div>
-          <div class="field"><label>Barcode</label>
-            <div class="bc-field-wrap">
-              <input id="f-bc" placeholder="Auto-generated" inputmode="numeric">
-              <button class="bc-gen-btn" onclick="genBarcode()" type="button">⟳ Generate</button>
-            </div>
-          </div>
-          <div class="field-row">
-            <div class="field"><label>Brand</label>
-              <select id="f-brand">
-                <option>Mini GT</option><option>Hot Wheels</option><option>Kaido House</option>
-                <option>PopRace</option><option>INNO64</option><option>Tarmac Works</option>
-                <option>LCD Models</option><option>PEAKO</option><option>Tomica Limited Vintage</option><option>Other</option>
-              </select>
-            </div>
-            <div class="field"><label>Scale</label>
-              <select id="f-scale"><option>1:64</option><option>1:43</option><option>1:18</option><option>1:24</option></select>
-            </div>
-          </div>
-          <div class="field"><label>Product name</label><input id="f-name" placeholder="e.g. Nissan GT-R R34 – Bayside Blue #55"></div>
-          <div class="field-row">
-            <div class="field"><label>Selling price (RM)</label><input id="f-price" type="number" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
-            <div class="field"><label>Cost price (RM)</label><input id="f-cost" type="number" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
-          </div>
-          <div class="field"><label>Stock qty</label><input id="f-stock" type="number" placeholder="1" min="0" inputmode="numeric"></div>
-          <div class="field"><label>Product photo</label>
-            <div class="img-upload" id="img-box">
-              <span class="upload-icon">📷</span>
-              <span style="font-size:13px">Tap to upload photo</span>
-              <div class="upload-overlay">Change photo</div>
-              <input type="file" accept="image/*" onchange="handleImg(this)">
-            </div>
-          </div>
-          <div class="btn-row">
-            <button class="btn btn-primary" onclick="saveProduct()">✓ Save</button>
-            <button class="btn btn-danger" id="delete-btn" style="display:none" onclick="requirePin(()=>deleteFromForm())">✕ Delete</button>
-            <button class="btn btn-outline" onclick="clearForm()">Clear</button>
-          </div>
-          <div id="save-msg"></div>
         </div>
       </div>
 
@@ -413,12 +363,11 @@
 
     </div><!-- /content -->
 
-    <!-- Bottom nav mobile (5 tabs) -->
+    <!-- Bottom nav mobile (4 tabs) -->
     <div class="bottom-nav">
       <div class="bottom-tabs">
         <div class="tab-item" onclick="goTab('sell')"      id="bnav-sell">      <span class="tab-icon">⊡</span><span>Sell</span><span class="tab-pip"></span></div>
         <div class="tab-item active" onclick="goTab('inventory')" id="bnav-inventory"><span class="tab-icon">◫</span><span>Stock</span><span class="tab-pip"></span></div>
-        <div class="tab-item" onclick="goTab('addedit')"   id="bnav-addedit">   <span class="tab-icon">⊕</span><span>Add</span><span class="tab-pip"></span></div>
         <div class="tab-item" onclick="goTab('sold')"      id="bnav-sold">      <span class="tab-icon">📋</span><span>Sold</span><span class="tab-pip"></span></div>
         <div class="tab-item" onclick="goTab('history')"   id="bnav-history">   <span class="tab-icon">⊟</span><span>History</span><span class="tab-pip"></span></div>
       </div>
@@ -492,6 +441,56 @@
     </div>
   </div>
 </div>
+
+<!-- ══ PRODUCT ADD/EDIT MODAL (opened from Inventory) ══ -->
+<div class="po-ovl" id="prod-modal"><div class="po-modal">
+  <h3 class="po-modal-h" id="form-mode-label">New product</h3>
+  <div class="field"><label>Look up existing barcode</label>
+    <div style="display:flex;gap:8px">
+      <input id="bc-input" style="flex:1" placeholder="Scan or type barcode…" onkeydown="if(event.key==='Enter')lookupBarcode()" inputmode="numeric">
+      <button class="btn btn-ghost" onclick="lookupBarcode()">Search</button>
+    </div>
+    <div id="bc-msg"></div>
+  </div>
+  <div class="field"><label>Barcode</label>
+    <div class="bc-field-wrap">
+      <input id="f-bc" placeholder="Auto-generated" inputmode="numeric">
+      <button class="bc-gen-btn" onclick="genBarcode()" type="button">⟳ Generate</button>
+    </div>
+  </div>
+  <div class="field-row">
+    <div class="field"><label>Brand</label>
+      <select id="f-brand">
+        <option>Mini GT</option><option>Hot Wheels</option><option>Kaido House</option>
+        <option>PopRace</option><option>INNO64</option><option>Tarmac Works</option>
+        <option>LCD Models</option><option>PEAKO</option><option>Tomica Limited Vintage</option><option>Other</option>
+      </select>
+    </div>
+    <div class="field"><label>Scale</label>
+      <select id="f-scale"><option>1:64</option><option>1:43</option><option>1:18</option><option>1:24</option></select>
+    </div>
+  </div>
+  <div class="field"><label>Product name</label><input id="f-name" placeholder="e.g. Nissan GT-R R34 – Bayside Blue #55"></div>
+  <div class="field-row">
+    <div class="field"><label>Selling price (RM)</label><input id="f-price" type="number" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
+    <div class="field"><label>Cost price (RM)</label><input id="f-cost" type="number" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
+  </div>
+  <div class="field"><label>Stock qty</label><input id="f-stock" type="number" placeholder="1" min="0" inputmode="numeric"></div>
+  <div class="field"><label>Product photo</label>
+    <div class="img-upload" id="img-box">
+      <span class="upload-icon">📷</span>
+      <span style="font-size:13px">Tap to upload photo</span>
+      <div class="upload-overlay">Change photo</div>
+      <input type="file" accept="image/*" onchange="handleImg(this)">
+    </div>
+  </div>
+  <div id="save-msg"></div>
+  <div class="po-modal-actions">
+    <button class="btn btn-danger" id="delete-btn" style="display:none" onclick="requirePin(()=>deleteFromForm())">✕ Delete</button>
+    <button class="btn btn-outline" onclick="closeProductModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveProduct()">✓ Save</button>
+  </div>
+</div></div>
 
 <!-- ══ PRE-ORDER MODALS ══ -->
 <div class="po-ovl" id="po-batch-modal"><div class="po-modal">

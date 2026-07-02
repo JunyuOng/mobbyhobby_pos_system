@@ -31,7 +31,7 @@ function _localSave() {
     localStorage.setItem('mhf_cust', JSON.stringify(customers));
     localStorage.setItem('mhf_pob',  JSON.stringify(poBatches));
     localStorage.setItem('mhf_poi',  JSON.stringify(poItems));
-  } catch(e) { showMsg('save-msg', 'Storage full', 'err'); }
+  } catch(e) { if (typeof poToast === 'function') poToast('Storage full — changes may not persist'); }
 }
 window._localSave = _localSave;
 
@@ -98,15 +98,18 @@ function nextReceiptNo() {
 // ── CODE 128B BARCODE ──
 const C128 = ['11011001100','11001101100','11001100110','10010011000','10010001100','10001001100','10011001000','10011000100','10001100100','11001001000','11001000100','11000100100','10110011100','10011011100','10011001110','10111001100','10011101100','10011100110','11001110010','11001011100','11001001110','11011100100','11001110100','11101101110','11101001100','11100101100','11100100110','11101100100','11100110100','11100110010','11011011000','11011000110','11000110110','10100011000','10001011000','10001000110','10110001000','10001101000','10001100010','11010001000','11000101000','11000100010','10110111000','10110001110','10001101110','10111011000','10111000110','10001110110','11101110110','11010001110','11000101110','11011101000','11011100010','11011101110','11101011000','11101000110','11100010110','11101101000','11101100010','11100011010','11101111010','11001000010','11110001010','10100110000','10100001100','10010110000','10010000110','10000101100','10000100110','10110010000','10110000100','10011010000','10011000010','10000110100','10000110010','11000010010','11001010000','11110111010','11000010100','10001111010','10100111100','10010111100','10010011110','10111100100','10011110100','10011110010','11110100100','11110010100','11110010010','11011011110','11011110110','11110110110','10101111000','10100011110','10001011110','10111101000','10111100010','11110101000','11110100010','10111011110','10111101110','11101011110','11110101110','11010000100','11010010000','11010011100','11000111010','11'];
 function code128B(t) { const v=[104]; for(let i=0;i<t.length;i++) v.push(t.charCodeAt(i)-32); let c=104; for(let i=1;i<v.length;i++) c+=v[i]*i; v.push(c%103); v.push(106); return v.map(x=>C128[x]).join(''); }
-function drawBarcode(text, bw, h, qz, fs) {
-  const p=code128B(text), cv=document.createElement('canvas'), lh=fs+6;
-  cv.width=p.length*bw+qz*2; cv.height=h+lh;
+// Bars only, supersampled `scale`× so the printer gets a high-DPI bitmap
+// (at scale 6 a 44mm-wide label works out to ~500dpi — no interpolation blur).
+// The human-readable digits are NOT baked into the canvas any more: they are
+// printed as real text under the image, so they stay vector-sharp at any
+// printer resolution instead of being a rasterized 7px bitmap.
+function drawBarcode(text, scale, h, qz) {
+  const p=code128B(text), cv=document.createElement('canvas');
+  cv.width=(p.length+qz*2)*scale; cv.height=h*scale;
   const ctx=cv.getContext('2d');
   ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
-  ctx.fillStyle='#000'; let x=qz;
-  for(let i=0;i<p.length;i++){if(p[i]==='1')ctx.fillRect(x,0,bw,h);x+=bw;}
-  ctx.font=`${fs}px monospace`; ctx.textAlign='center';
-  ctx.fillText(text,cv.width/2,h+lh-2);
+  ctx.fillStyle='#000'; let x=qz*scale;
+  for(let i=0;i<p.length;i++){if(p[i]==='1')ctx.fillRect(x,0,scale,cv.height);x+=scale;}
   return cv.toDataURL('image/png');
 }
 
@@ -247,7 +250,7 @@ function exitCashierMode() {
 
 // ── NAV ──
 let currentTab = 'inventory';
-const TITLES = { sell:'Sell', inventory:'Inventory', addedit:'Add / Edit', events:'Events', sold:'Sold Items', labels:'Print Labels', importexport:'Import / Export', history:'History', preorders:'Pre-orders' };
+const TITLES = { sell:'Sell', inventory:'Inventory', events:'Events', sold:'Sold Items', labels:'Print Labels', importexport:'Import / Export', history:'History', preorders:'Pre-orders' };
 function goTab(t) {
   if (t === currentTab) return;
   const op = document.getElementById('panel-' + currentTab);
@@ -267,7 +270,6 @@ function goTab(t) {
   if (t === 'sold')         { renderSoldItems(); }
   if (t === 'preorders')    { renderPreorders(); }
   if (t === 'sell')         { updateTopbarEvent(); setSaleType(false, poDefaultSaleType()); renderSellCart(); setTimeout(() => document.getElementById('sell-input').focus(), 200); }
-  if (t === 'addedit' && !document.getElementById('f-bc').value) genBarcode();
 }
 
 // ── EVENTS (store events) ──
@@ -887,10 +889,10 @@ function toggleSelectAll() { const all=document.querySelectorAll('[id^=ichk-]');
 function updateBulkBar() { const n=selectedRows.size; const bar=document.getElementById('bulk-bar'); if(n>0){bar.classList.add('show');document.getElementById('bulk-count').textContent=n+' selected';}else bar.classList.remove('show'); }
 function applyBulkEdit() {
   const np=document.getElementById('bulk-price').value; const ns=document.getElementById('bulk-stock').value;
-  if(!np&&!ns){showMsg('save-msg','Enter price or stock','err');return;}
+  if(!np&&!ns){poToast('Enter a price or stock value first');return;}
   let ch=0; selectedRows.forEach(bc=>{const p=products.find(x=>x.barcode===bc);if(!p)return;if(np!=='')p.price=parseFloat(np)||p.price;if(ns!=='')p.stock=Math.max(0,parseInt(ns)||0);ch++;save('PRODUCT_UPSERT',p);});
   document.getElementById('bulk-price').value=''; document.getElementById('bulk-stock').value='';
-  renderInventory(); renderStats(); showMsg('save-msg',ch+' products updated','ok');
+  renderInventory(); renderStats(); poToast(ch+' products updated');
 }
 function bulkDelete() {
   if(!selectedRows.size)return; if(!confirm(`Delete ${selectedRows.size} products?`))return;
@@ -908,9 +910,17 @@ function deleteProduct(bc) {
   products=products.filter(p=>p.barcode!==bc);
   save('PRODUCT_DELETE',{barcode:bc}); renderInventory(); renderStats();
 }
-function editProduct(bc) { goTab('addedit'); document.getElementById('bc-input').value=bc; lookupBarcode(); }
-
-// ── ADD/EDIT ──
+// ── ADD/EDIT (modal on the Inventory page) ──
+// Add Item and Edit share the same form; the modal closes itself after a
+// successful save and the inventory list refreshes in place — no tab switch.
+function openAddProduct() { clearForm(); poOpen('prod-modal'); setTimeout(() => { const i = document.getElementById('f-name'); if (i) i.focus(); }, 100); }
+function editProduct(bc) {
+  clearForm();
+  document.getElementById('bc-input').value = bc;
+  lookupBarcode();
+  poOpen('prod-modal');
+}
+function closeProductModal() { poClose('prod-modal'); clearForm(); }
 let editingBc=null, pendingImg=null;
 function handleImg(input) {
   const file=input.files[0]; if(!file)return;
@@ -959,7 +969,7 @@ function saveProduct() {
     const i=products.findIndex(p=>p.barcode===editingBc);
     if(i>=0) prod.img = pendingImg || products[i].img || null;
     if(i>=0) products[i]={...products[i],...prod};
-    showMsg('save-msg','Updated','ok');
+    poToast('Product updated');
   } else {
     if(products.find(p=>p.barcode===bc)){showMsg('save-msg','Barcode already exists','err');return;}
     // duplicate name check for new products
@@ -969,11 +979,13 @@ function saveProduct() {
       return;
     }
     products.push(prod);
-    showMsg('save-msg','Product added','ok');
+    poToast('Product added');
   }
-  save('PRODUCT_UPSERT', prod); clearForm(); renderStats();
+  save('PRODUCT_UPSERT', prod);
+  closeProductModal();
+  renderInventory(); renderStats();
 }
-function deleteFromForm() { if(!editingBc||!confirm('Delete?'))return; save('PRODUCT_DELETE',{barcode:editingBc}); products=products.filter(p=>p.barcode!==editingBc); _localSave(); clearForm(); renderStats(); }
+function deleteFromForm() { if(!editingBc||!confirm('Delete?'))return; save('PRODUCT_DELETE',{barcode:editingBc}); products=products.filter(p=>p.barcode!==editingBc); _localSave(); closeProductModal(); renderInventory(); renderStats(); }
 function clearForm() {
   ['f-bc','f-name','f-price','f-stock','f-cost'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('bc-input').value=''; document.getElementById('f-brand').value='Mini GT'; document.getElementById('f-scale').value='1:64';
@@ -1144,14 +1156,14 @@ function printLabelSheet() {
   for (let i=0; i<items.length; i+=PERPAGE) pages.push(items.slice(i,i+PERPAGE));
 
   const bcCache = {};
-  items.forEach(p => { if (!bcCache[p.barcode]) bcCache[p.barcode] = drawBarcode(p.barcode,1,38,8,7); });
+  items.forEach(p => { if (!bcCache[p.barcode]) bcCache[p.barcode] = drawBarcode(p.barcode,6,38,8); });
 
   const sheetsHtml = pages.map(page => {
     while (page.length < PERPAGE) page.push(null);
     return `<div class="sheet">${page.map(p => {
       if (!p) return `<div class="lbl"></div>`;
       const name = p.name.length > 28 ? p.name.substring(0,26)+'…' : p.name;
-      return `<div class="lbl"><div class="lbl-name">${name}</div><div class="lbl-brand">${p.brand} ${p.scale}</div><img class="lbl-bc" src="${bcCache[p.barcode]}" alt="${p.barcode}"><div class="lbl-price">RM ${p.price.toFixed(2)}</div></div>`;
+      return `<div class="lbl"><div class="lbl-name">${name}</div><div class="lbl-brand">${p.brand} ${p.scale}</div><img class="lbl-bc" src="${bcCache[p.barcode]}" alt="${p.barcode}"><div class="lbl-bc-text">${p.barcode}</div><div class="lbl-price">RM ${p.price.toFixed(2)}</div></div>`;
     }).join('')}</div>`;
   }).join('');
 
@@ -1162,7 +1174,8 @@ function printLabelSheet() {
   .lbl{width:50mm;height:30mm;border:.3pt solid #bbb;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1.5mm 2mm;text-align:center;overflow:hidden}
   .lbl-name{font-size:6.5pt;font-weight:700;color:#000;line-height:1.2;margin-bottom:.5mm}
   .lbl-brand{font-size:5.5pt;color:#555;margin-bottom:.5mm}
-  .lbl-bc{width:44mm;height:auto;display:block;margin:0 auto}
+  .lbl-bc{width:44mm;height:8mm;display:block;margin:0 auto}
+  .lbl-bc-text{font-family:'Courier New',monospace;font-size:6.5pt;font-weight:600;color:#000;letter-spacing:1.5px;line-height:1.2;margin-top:.3mm}
   .lbl-price{font-size:9pt;font-weight:800;color:#002FA7;margin-top:.5mm}
   @media print{html,body{width:210mm}@page{size:A4 portrait;margin:0}.np{display:none}}</style></head><body>
   <div class="np" style="padding:12px 20px;background:#f0f4ff;font-family:Arial;font-size:13px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #c5d0f5">
@@ -1530,7 +1543,17 @@ function poBackStatus(itemId) {
     if (it.status === 'Ready To Ship' && prev === 'Awaiting Payment' && it.paidPrevDeposit !== undefined) {
       it.depositPaid = it.paidPrevDeposit; delete it.paidPrevDeposit;
     }
-    it.status = prev; save('POITEM_UPSERT', it); renderPreorders(); poToast('← ' + prev);
+    it.status = prev; save('POITEM_UPSERT', it);
+    // Re-entering Waiting Stock: if the batch has spare received stock, the
+    // standard FIFO allocation kicks in immediately (same path as receiving).
+    let allocatedBack = false;
+    if (prev === 'Waiting Stock') {
+      poAllocate(it.batchId);
+      const fresh = poItems.find(x => x.id === itemId);   // re-find: save() can replace the object
+      allocatedBack = !!fresh && fresh.status !== 'Waiting Stock';
+    }
+    renderPreorders();
+    poToast(allocatedBack ? '← Waiting Stock · stock available — re-allocated (Arrived)' : '← ' + prev);
   });
 }
 
@@ -1914,17 +1937,25 @@ function poModelDetailHtml(id) {
   const b = poBatchById(id); if (!b) return '<div class="po-empty">Model not found</div>';
   const its = poItemsForBatch(id).filter(i => i.status !== 'Cancelled');
   const totQty = its.reduce((a, i) => a + i.qty, 0);
+  // Aligned grid (shared column template with a header row) so Qty / Deposit /
+  // Balance line up across rows and long names ellipsize instead of pushing
+  // the numbers around.
   const rows = its.map(it => {
     const c = poCustomerById(it.customerId);
     return `<div class="po-wrow" onclick="poSelectCustomer('${it.customerId}')">
       <div class="po-av">${_poInitials(c ? c.name : '?')}</div>
       <div class="po-cust-main"><div class="po-cust-name">${_esc(c ? c.name : '(unknown)')}</div><div class="po-cust-sub">${_esc(c ? c.platform : '')}</div></div>
-      <div class="po-wc">${it.qty}<span>Qty</span></div>
-      <div class="po-wc">RM ${(Number(it.depositPaid) || 0).toFixed(0)}<span>Deposit</span></div>
-      <div class="po-wc">RM ${poItemOutstanding(it).toFixed(0)}<span>Balance</span></div>
-      ${poBadge(it.status)}
+      <div class="po-wc">${it.qty}</div>
+      <div class="po-wc">RM ${(Number(it.depositPaid) || 0).toFixed(0)}</div>
+      <div class="po-wc">RM ${poItemOutstanding(it).toFixed(0)}</div>
+      <div class="po-wst">${poBadge(it.status)}</div>
     </div>`;
-  }).join('') || '<div class="po-empty">No customers yet — tap “Add Customer”.</div>';
+  }).join('');
+  const table = rows
+    ? `<div class="po-wtable">
+        <div class="po-whead"><span></span><span>Customer</span><span class="po-wc">Qty</span><span class="po-wc">Deposit</span><span class="po-wc">Balance</span><span>Status</span></div>
+        ${rows}</div>`
+    : '<div class="po-empty">No customers yet — tap “Add Customer”.</div>';
   return `<div class="po-detail-head">
       <div class="po-detail-img" ${poImgStyle(b)}>${poImgInner(b)}</div>
       <div style="flex:1;min-width:0"><div class="po-detail-name">${_esc(b.modelName)}</div>
@@ -1955,7 +1986,7 @@ function poModelDetailHtml(id) {
       </div>
     </div>
     <div class="po-collapse-h" onclick="poToggleCollapse(this)"><span class="po-chev">▾</span> Customers (${its.length})</div>
-    <div>${rows}</div>`;
+    ${table}`;
 }
 
 // ── UTILS ──

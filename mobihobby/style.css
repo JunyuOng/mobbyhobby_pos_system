@@ -40,10 +40,11 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--
 .mh-logo-mark{width:auto;flex-shrink:0;display:inline-block;vertical-align:middle}
 .sidebar-logo .brand .mh-logo-mark{height:1.7em}
 .lock-logo .mh-logo-mark{height:1.3em}
-.topbar-logo{height:34px}
-/* full lockup image (sidebar + lock) — your PNG includes the wordmark */
+.topbar-logo{height:44px}
+/* full lockup image (sidebar + lock) — your PNG includes the wordmark.
+   Sized in CSS px from a 1254px source, so it stays sharp on high-DPI. */
 .mh-logo-full{width:auto;max-width:100%;display:block}
-.sidebar-logo .brand .mh-logo-full{height:56px}
+.sidebar-logo .brand .mh-logo-full{height:72px}
 .lock-logo .mh-logo-full{height:62px;margin:0 auto}
 /* graceful fallback badge if the asset is missing (no broken-image icon) */
 .mh-logo-fallback{display:inline-flex;align-items:center;justify-content:center;height:1.7em;aspect-ratio:1;border-radius:6px;background:#E58A0E;color:#fff;font-weight:800;font-size:.8em;flex-shrink:0;vertical-align:middle}
@@ -51,10 +52,9 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--
 .sidebar.collapsed .sidebar-logo .brand span{display:none}
 .sidebar.collapsed .sidebar-logo .brand{justify-content:center}
 .sidebar-nav{flex:1;padding:10px 0;overflow-y:auto}
-.nav-item{display:flex;align-items:center;gap:11px;padding:12px 24px;color:rgba(255,255,255,.6);font-size:14px;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:all .2s;user-select:none}
+.nav-item{display:flex;align-items:center;padding:12px 24px;color:rgba(255,255,255,.6);font-size:14px;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:all .2s;user-select:none}
 .nav-item:hover{background:rgba(255,255,255,.08);color:#fff}
 .nav-item.active{background:rgba(255,255,255,.13);color:#fff;border-left-color:#fff}
-.nav-icon{font-size:16px;width:20px;text-align:center;flex-shrink:0}
 .sidebar-footer{padding:14px 16px;border-top:1px solid rgba(255,255,255,.12);display:flex;flex-direction:column;gap:8px}
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 .topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:10px;flex-shrink:0;z-index:10}
@@ -67,7 +67,7 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--
 .lock-btn{padding:6px 12px;background:var(--warning-bg);color:var(--warning);border:none;border-radius:var(--radius-sm);font-family:'Inter',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
 .content{flex:1;overflow-y:auto;padding:18px 24px;position:relative}
 .bottom-nav{display:none;background:var(--surface);border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom,0px);flex-shrink:0}
-.bottom-tabs{display:grid;grid-template-columns:repeat(5,1fr)}
+.bottom-tabs{display:grid;grid-template-columns:repeat(4,1fr)}
 .tab-item{display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 4px 7px;color:var(--text-3);font-size:10px;font-weight:600;cursor:pointer;transition:color .2s;user-select:none}
 .tab-icon{font-size:19px;line-height:1}
 .tab-item.active{color:var(--blue)}
@@ -230,6 +230,7 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--
 .cart-actions{display:flex;gap:8px}
 
 /* ── INVENTORY ── */
+.inv-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)}
 .inv-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
 .inv-filters select{padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-pill);font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--surface);appearance:none;-webkit-appearance:none;cursor:pointer}
 .inv-filters select:focus{outline:none;border-color:var(--blue)}
@@ -511,7 +512,9 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--
 .po-detail-img{width:88px;height:88px;border-radius:var(--radius);background:var(--blue-ice) center/cover no-repeat;display:flex;align-items:center;justify-content:center;font-size:36px;flex-shrink:0}
 .po-detail-name{font-size:19px;font-weight:800;color:var(--text)}
 .po-detail-sub{font-size:12px;color:var(--text-2);margin-top:3px;word-break:break-word}
-.po-detail-actions{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap}
+/* cap the action block so many buttons wrap instead of crushing the name/info
+   column into vertical one-letter-per-line text */
+.po-detail-actions{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;flex:0 1 auto;max-width:42%}
 .po-kv-row{display:flex;gap:18px;flex-wrap:wrap;margin-top:9px}
 .po-kv{font-size:14px;font-weight:800;color:var(--text)}
 .po-kv span{display:block;font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px}
@@ -550,11 +553,17 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--
 .po-arr{margin:0 7px;color:var(--border)}
 .po-item-actions{display:flex;gap:7px;flex-wrap:wrap}
 
-/* shipment rows */
-.po-wrow{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:7px;cursor:pointer;transition:.15s}
+/* batch view — customer rows share one grid template with the header row so
+   the Qty / Deposit / Balance columns stay aligned whatever the content is */
+.po-wtable{overflow-x:auto}
+.po-whead,.po-wrow{display:grid;grid-template-columns:34px minmax(120px,1fr) 44px 76px 76px 122px;gap:10px;align-items:center;min-width:510px}
+.po-whead{padding:0 12px 6px;font-size:9px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px}
+.po-whead .po-wc{font-size:9px;font-weight:700;color:var(--text-3)}
+.po-wrow{padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:7px;cursor:pointer;transition:.15s}
 .po-wrow:hover{border-color:var(--blue);background:var(--blue-ice)}
-.po-wc{font-size:12px;font-weight:700;color:var(--text);text-align:center}
-.po-wc span{display:block;font-size:9px;font-weight:600;color:var(--text-3);text-transform:uppercase}
+.po-wc{font-size:12px;font-weight:700;color:var(--text);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.po-wst{min-width:0}
+.po-wst .po-badge{max-width:100%;overflow:hidden;text-overflow:ellipsis}
 
 /* modals */
 .po-ovl{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1500;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(5px)}

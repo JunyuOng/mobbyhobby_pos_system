@@ -250,7 +250,7 @@ function exitCashierMode() {
 
 // ── NAV ──
 let currentTab = 'inventory';
-const TITLES = { sell:'Sell', inventory:'Inventory', events:'Events', sold:'Sold Items', labels:'Print Labels', importexport:'Import / Export', history:'History', preorders:'Pre-orders' };
+const TITLES = { sell:'Sell', inventory:'Inventory', preorders:'Pre-orders', sales:'Sales', labels:'Print Labels' };
 function goTab(t) {
   if (t === currentTab) return;
   const op = document.getElementById('panel-' + currentTab);
@@ -264,10 +264,8 @@ function goTab(t) {
   const te = document.getElementById('topbar-title');
   te.style.opacity = '0'; setTimeout(() => { te.textContent = TITLES[t]; te.style.opacity = '1'; }, 100);
   if (t === 'inventory')    { renderInventory(); renderStats(); }
-  if (t === 'history')      { populateHistEventFilter(); setHistMode(histMode); }
+  if (t === 'sales')        { renderSales(); }
   if (t === 'labels')       { renderLabelList(''); }
-  if (t === 'events')       { renderEventList(); }
-  if (t === 'sold')         { renderSoldItems(); }
   if (t === 'preorders')    { renderPreorders(); }
   if (t === 'sell')         { updateTopbarEvent(); setSaleType(false, poDefaultSaleType()); renderSellCart(); setTimeout(() => document.getElementById('sell-input').focus(), 200); }
 }
@@ -307,6 +305,10 @@ function refreshSaleTypeUI() {
   });
 }
 function saveActiveEvent() { localStorage.setItem('mhf_aev', activeEventId); }
+
+// Events live in a modal now (opened from the Sell tab / topbar chip) —
+// no dedicated tab.
+function openEventsModal() { renderEventList(); poOpen('events-modal'); }
 
 // NOTE: must NOT be named createEvent — inline on* handlers resolve names
 // against `document` first, where createEvent is a native (deprecated) method,
@@ -1210,6 +1212,10 @@ function parseScale(raw) {
   return clean || '1:64';
 }
 
+// CSV import lives in a modal opened from the Inventory toolbar.
+function openImportModal() { cancelImport(); poOpen('import-modal'); }
+function closeImportModal() { cancelImport(); poClose('import-modal'); }
+
 let pendingImportData = [];
 function handleCSVImport(input) {
   const file=input.files[0]; if(!file)return;
@@ -1251,10 +1257,25 @@ function confirmImport() {
   pendingImportData=[];
   document.getElementById('import-preview').innerHTML='';
   document.getElementById('import-actions').style.display='none';
-  showMsg('import-msg',`Done — ${added} added, ${updated} updated`,'ok');
-  renderStats();
+  closeImportModal();
+  poToast(`Imported — ${added} added, ${updated} updated`);
+  renderInventory(); renderStats();
 }
 function cancelImport() { pendingImportData=[]; document.getElementById('import-preview').innerHTML=''; document.getElementById('import-actions').style.display='none'; document.getElementById('import-msg').innerHTML=''; }
+
+// ── SALES TAB (Transactions ⇆ Items sold in one place) ──
+let salesViewMode = 'transactions';
+function setSalesView(v) {
+  salesViewMode = v;
+  document.querySelectorAll('#sales-view-row .saletype-btn').forEach(b => b.classList.toggle('active', b.dataset.sview === v));
+  document.getElementById('sales-transactions').style.display = v === 'transactions' ? '' : 'none';
+  document.getElementById('sales-items').style.display = v === 'items' ? '' : 'none';
+  renderSales();
+}
+function renderSales() {
+  if (salesViewMode === 'transactions') { populateHistEventFilter(); setHistMode(histMode); }
+  else renderSoldItems();
+}
 
 // ── HISTORY ──
 function clearHistory() { if(!confirm('Clear ALL history?'))return; sales=[]; save('HISTORY_CLEAR', { timestamp: Date.now() }); renderHistory(); renderHistStats(); }
@@ -1709,19 +1730,35 @@ function saveEditItem() {
 let _poPostBatch = null;
 function poBuildPost(batchId) {
   const b = poBatchById(batchId); const R = '—'.repeat(17); const L = [];
-  L.push('🔥 PRE-ORDER OPEN 🔥'); L.push(R);
-  L.push(`${b.brand ? b.brand + ' ' : ''}${b.modelName}`);
-  if (b.eta) L.push('📅 ETA: ' + b.eta);
-  L.push('💰 Price: RM ' + (Number(b.price) || 0).toFixed(2));
-  L.push('💵 Deposit: RM ' + (Number(b.deposit) || 0).toFixed(2) + ' to secure your unit');
+  const price = (Number(b.price) || 0).toFixed(2);
+  const dep = (Number(b.deposit) || 0).toFixed(2);
+  const bal = Math.max(0, (Number(b.price) || 0) - (Number(b.deposit) || 0)).toFixed(2);
+  L.push('🔥🔥 PRE-ORDER NOW OPEN 🔥🔥');
+  L.push('');
+  L.push(`🚗 ${b.brand ? b.brand + ' ' : ''}${b.modelName}`);
+  L.push('📏 1:64 scale die-cast');
+  L.push('📅 ETA: ' + (b.eta || 'TBA — we\'ll update you'));
   L.push(R);
-  L.push('How to order 👇');
-  L.push('1️⃣ PM / WhatsApp us to reserve');
-  L.push('2️⃣ Pay the deposit to confirm');
-  L.push('3️⃣ Settle balance when it arrives');
-  if (b.notes) { L.push(R); L.push(b.notes); }
+  L.push('💰 Price   : RM ' + price);
+  L.push('💵 Deposit : RM ' + dep + ' per unit');
+  L.push('🧾 Balance : RM ' + bal + ' (pay when it lands)');
   L.push(R);
-  L.push('MobiHobby 🏁 #preorder #diecast #164');
+  L.push('📦 HOW TO ORDER');
+  L.push('1️⃣ PM / WhatsApp us to reserve your unit(s)');
+  L.push('2️⃣ Pay the deposit to lock in your slot');
+  L.push('3️⃣ We\'ll message you the moment stock arrives');
+  L.push('4️⃣ Settle the balance & choose postage or pickup');
+  L.push('');
+  L.push('⚠️ Slots are limited & strictly first-come-');
+  L.push('first-served — once allocation is full,');
+  L.push('it\'s gone! Deposits secure your unit.');
+  if (b.notes) { L.push(R); L.push('📝 ' + b.notes); }
+  L.push(R);
+  L.push('🏁 MobiHobby — Diecast & Hobby Collectibles');
+  L.push('📲 DM us now to reserve yours today!');
+  L.push('');
+  L.push('#preorder #diecast #164scale #diecastcollector');
+  L.push('#diecastmalaysia #hobbycollectibles #MobiHobby');
   return L.join('\n');
 }
 function openPost(batchId) { _poPostBatch = batchId; document.getElementById('po-post-text').textContent = poBuildPost(batchId); poOpen('po-post-modal'); }
@@ -1771,6 +1808,18 @@ function poImport(input) {
   r.readAsText(f);
 }
 
+// ── "⋯ More" dropdown (secondary batch actions live here to keep the
+//    detail header uncluttered). Any click elsewhere closes it. ──
+function poCloseMenus() { document.querySelectorAll('.po-menu.open').forEach(m => m.classList.remove('open')); }
+function poToggleMenu(e, id) {
+  if (e) e.stopPropagation();
+  const m = document.getElementById(id); if (!m) return;
+  const wasOpen = m.classList.contains('open');
+  poCloseMenus();
+  if (!wasOpen) m.classList.add('open');
+}
+document.addEventListener('click', poCloseMenus);
+
 // ── selection ──
 function poSelectCustomer(id) { poSel = { customerId: id, batchId: null }; renderPreorders(); }
 function poSelectBatch(id) { poSel = { customerId: null, batchId: id }; renderPreorders(); }
@@ -1787,8 +1836,15 @@ function poBatchIsComplete(id) {
   const its = poItemsForBatch(id).filter(i => i.status !== 'Cancelled');
   return its.length > 0 && its.every(i => i.status === 'Completed');
 }
+// Settled = nothing still in progress (every non-cancelled item Completed).
+// An empty batch counts as settled — there is nothing owed on it.
+function poBatchSettled(id) {
+  return poItemsForBatch(id).filter(i => i.status !== 'Cancelled').every(i => i.status === 'Completed');
+}
 function archivePoBatch(id) {
   const b = poBatchById(id); if (!b) return;
+  const open = poItemsForBatch(id).filter(i => !['Cancelled', 'Completed'].includes(i.status)).length;
+  if (open) { poToast(`Can't archive — ${open} preorder(s) not settled yet`); return; }
   b.archived = true; save('POBATCH_UPSERT', b);
   if (poSel.batchId === id) poSel = { customerId: null, batchId: null };
   renderPreorders(); poToast('Batch archived (unarchive from the Archived view)');
@@ -1975,14 +2031,19 @@ function poModelDetailHtml(id) {
         ${b.notes ? `<div class="po-detail-sub">📝 ${_esc(b.notes)}</div>` : ''}</div>
       <div class="po-detail-actions">
         <button class="btn btn-primary btn-sm" onclick="openReceive('${b.id}')">📦 Receive Stock</button>
-        <button class="btn btn-warning btn-sm" onclick="poNotify('${b.id}')">🔔 Notify</button>
-        <button class="btn btn-ghost btn-sm" onclick="openPost('${b.id}')">📝 Copy post</button>
-        <button class="btn btn-outline btn-sm" onclick="poExportModelCSV('${b.id}')">⬇ Export</button>
         <button class="btn btn-ghost btn-sm" onclick="openAddCustomer('${b.id}')">＋ Add Customer</button>
-        ${b.archived
-          ? `<button class="btn btn-outline btn-sm" onclick="unarchivePoBatch('${b.id}')">📂 Unarchive</button>`
-          : `<button class="btn btn-outline btn-sm" onclick="archivePoBatch('${b.id}')">🗄 Archive</button>`}
-        <button class="btn btn-danger btn-sm" onclick="deletePoBatch('${b.id}')">🗑 Delete</button>
+        <button class="btn btn-warning btn-sm" onclick="poNotify('${b.id}')">🔔 Notify</button>
+        <div class="po-menu-wrap">
+          <button class="btn btn-outline btn-sm" onclick="poToggleMenu(event,'po-menu-${b.id}')">⋯ More</button>
+          <div class="po-menu" id="po-menu-${b.id}">
+            <button onclick="openPost('${b.id}')">📝 Copy post</button>
+            <button onclick="poExportModelCSV('${b.id}')">⬇ Export CSV</button>
+            ${b.archived
+              ? `<button onclick="unarchivePoBatch('${b.id}')">📂 Unarchive</button>`
+              : `<button onclick="archivePoBatch('${b.id}')" ${poBatchSettled(b.id) ? '' : 'disabled title="All preorders must be settled first"'}>🗄 Archive</button>`}
+            <button class="danger" onclick="deletePoBatch('${b.id}')">🗑 Delete batch</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="po-collapse-h" onclick="poToggleCollapse(this)"><span class="po-chev">▾</span> Customers (${its.length})</div>
@@ -2009,10 +2070,10 @@ function initDropzone() {
 // ── DATA SYNC LISTENER ──
 window.addEventListener('mh_data_updated', () => {
   if (currentTab === 'inventory') { renderInventory(); renderStats(); }
-  if (currentTab === 'history')   { renderHistory(); renderHistStats(); }
-  if (currentTab === 'sold')      { renderSoldItems(); }
+  if (currentTab === 'sales')     { renderSales(); }
   if (currentTab === 'preorders') { renderPreorders(); }
-  // keep the cashier read-only Sold Items view live while it is open
+  // keep the open modals/overlays live too
+  if (document.getElementById('events-modal')?.classList.contains('open')) renderEventList();
   if (_cashierSoldOpen) renderCashierSold(document.getElementById('cs-search')?.value || '');
 });
 

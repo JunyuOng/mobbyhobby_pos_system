@@ -31,20 +31,19 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--
 /* ── LAYOUT ── */
 .layout{display:flex;height:100dvh;overflow:hidden}
 .sidebar{width:220px;flex-shrink:0;background:var(--sidebar-bg);display:flex;flex-direction:column;transition:background .2s}
-.sidebar-logo{padding:22px 24px 18px;border-bottom:1px solid rgba(255,255,255,.12)}
-.sidebar-logo .brand{font-size:18px;font-weight:800;color:#fff;letter-spacing:-.3px;display:flex;align-items:center;gap:10px}
-.sidebar-logo .tagline{font-size:11px;color:rgba(255,255,255,.5);margin-top:2px}
+.sidebar-logo{padding:22px 24px 18px;border-bottom:1px solid rgba(255,255,255,.12);text-align:center}
+.sidebar-logo .brand{font-size:18px;font-weight:800;color:#fff;letter-spacing:-.3px;display:flex;align-items:center;justify-content:center;gap:10px}
+.sidebar-logo .tagline{font-size:11px;color:rgba(255,255,255,.5);margin-top:6px}
 
 /* ── BRAND LOGO (swap via assets/logo.svg or MH_LOGO_SRC in app.js) ── */
 /* height is em-relative + width:auto → scales with context, preserves aspect, no fixed box */
 .mh-logo-mark{width:auto;flex-shrink:0;display:inline-block;vertical-align:middle}
 .sidebar-logo .brand .mh-logo-mark{height:1.7em}
 .lock-logo .mh-logo-mark{height:1.3em}
-.topbar-logo{height:44px}
 /* full lockup image (sidebar + lock) — your PNG includes the wordmark.
    Sized in CSS px from a 1254px source, so it stays sharp on high-DPI. */
 .mh-logo-full{width:auto;max-width:100%;display:block}
-.sidebar-logo .brand .mh-logo-full{height:72px}
+.sidebar-logo .brand .mh-logo-full{height:144px;margin:0 auto}
 .lock-logo .mh-logo-full{height:62px;margin:0 auto}
 /* graceful fallback badge if the asset is missing (no broken-image icon) */
 .mh-logo-fallback{display:inline-flex;align-items:center;justify-content:center;height:1.7em;aspect-ratio:1;border-radius:6px;background:#E58A0E;color:#fff;font-weight:800;font-size:.8em;flex-shrink:0;vertical-align:middle}
@@ -515,6 +514,15 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--
 /* cap the action block so many buttons wrap instead of crushing the name/info
    column into vertical one-letter-per-line text */
 .po-detail-actions{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;flex:0 1 auto;max-width:42%}
+/* "⋯ More" dropdown — secondary batch actions live here */
+.po-menu-wrap{position:relative}
+.po-menu{display:none;position:absolute;right:0;top:calc(100% + 6px);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:0 12px 32px rgba(0,0,0,.16);padding:6px;min-width:176px;z-index:60;flex-direction:column;gap:2px}
+.po-menu.open{display:flex;animation:slideIn .15s ease}
+.po-menu button{display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;text-align:left;padding:9px 12px;border-radius:6px;font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:var(--text-2);cursor:pointer;white-space:nowrap}
+.po-menu button:hover{background:var(--blue-ice);color:var(--blue)}
+.po-menu button.danger{color:var(--danger)}
+.po-menu button.danger:hover{background:var(--danger-bg)}
+.po-menu button:disabled{opacity:.4;cursor:not-allowed;background:none;color:var(--text-2)}
 .po-kv-row{display:flex;gap:18px;flex-wrap:wrap;margin-top:9px}
 .po-kv{font-size:14px;font-weight:800;color:var(--text)}
 .po-kv span{display:block;font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px}

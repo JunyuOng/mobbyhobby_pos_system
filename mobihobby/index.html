@@ -242,14 +242,14 @@
         <div id="sales-transactions">
           <div class="stat-grid" id="hist-stats"></div>
           <div class="hist-mode-row" id="hist-mode-row" style="display:flex;gap:6px;margin-bottom:10px">
-            <button class="saletype-btn active" data-mode="events" onclick="setHistMode('events')">📅 Event sales</button>
-            <button class="saletype-btn" data-mode="online" onclick="setHistMode('online')">🌐 Online sales</button>
+            <button class="saletype-btn active" data-mode="online" onclick="setHistMode('online')">🌐 Online sales</button>
+            <button class="saletype-btn" data-mode="events" onclick="setHistMode('events')">📅 Event sales</button>
           </div>
           <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-            <select id="hist-event-filter" onchange="renderHistory();renderHistStats()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-pill);font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--surface);appearance:none;flex:1">
+            <select id="hist-event-filter" onchange="renderHistory();renderHistStats()" style="display:none;padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-pill);font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--surface);appearance:none;flex:1">
               <option value="">All events</option>
             </select>
-            <select id="hist-platform-filter" onchange="renderHistory();renderHistStats()" style="display:none;padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-pill);font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--surface);appearance:none;flex:1">
+            <select id="hist-platform-filter" onchange="renderHistory();renderHistStats()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-pill);font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--surface);appearance:none;flex:1">
               <option value="">All platforms</option>
             </select>
             <button class="btn btn-danger btn-sm" onclick="requirePin(()=>clearHistory())">🗑 Clear</button>
@@ -283,7 +283,7 @@
         </div>
         <div class="card" style="background:var(--blue-ice);border-color:var(--blue-border)">
           <div style="font-size:13px;color:var(--text-2);line-height:1.8">
-            <strong style="color:var(--blue)">Tip:</strong> Qty defaults to stock count. Labels auto-paginate across multiple A4 sheets if over 36.<br>
+            <strong style="color:var(--blue)">Tip:</strong> Qty defaults to stock count. Out-of-stock items are hidden. Labels auto-paginate across multiple A4 sheets if over 36.<br>
             Chrome: <strong>A4 · Portrait · No scaling (100%)</strong>.
           </div>
         </div>

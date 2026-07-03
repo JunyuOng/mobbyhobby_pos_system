@@ -911,11 +911,15 @@ function renderInventory() {
   const f = getFilteredSorted();
   document.getElementById('inv-empty').style.display = f.length ? 'none' : 'block';
   document.getElementById('inv-result-count').textContent = f.length===products.length ? `${products.length} products` : `Showing ${f.length} of ${products.length}`;
-  document.getElementById('inv-body').innerHTML = f.map(p => `
-    <tr>
+  // Sold-out items don't mix with sellable stock: they sink to their own
+  // labelled section at the bottom (dimmed, still restockable/editable).
+  const inStock = f.filter(p => (p.stock || 0) > 0);
+  const oos     = f.filter(p => (p.stock || 0) <= 0);
+  const row = p => { const out = (p.stock || 0) <= 0; return `
+    <tr class="${out ? 'inv-oos' : ''}">
       <td><input type="checkbox" class="sel-check" id="ichk-${p.barcode}" onchange="toggleRowSelect('${p.barcode}',this.checked)"></td>
       <td>${p.img ? `<img class="thumb" src="${p.img}" alt="">` : `<div class="thumb-ph">🚗</div>`}</td>
-      <td><div class="prod-name">${p.name}</div><div class="prod-bc">${p.barcode}</div></td>
+      <td><div class="prod-name">${p.name}${out ? ' <span class="oos-pill">Sold out</span>' : ''}</div><div class="prod-bc">${p.barcode}</div></td>
       <td style="font-size:12px;color:var(--text-2)">${p.brand}<br><span style="color:var(--text-3);font-size:11px">${p.scale}</span></td>
       <td style="font-weight:700;color:var(--blue)">RM ${p.price.toFixed(2)}</td>
       <td><div class="stepper">
@@ -927,7 +931,9 @@ function renderInventory() {
         <button class="btn btn-ghost btn-sm" onclick="editProduct('${p.barcode}')">Edit</button>
         <button class="btn btn-danger btn-sm" onclick="requirePin(()=>deleteProduct('${p.barcode}'))">✕</button>
       </div></td>
-    </tr>`).join('');
+    </tr>`; };
+  document.getElementById('inv-body').innerHTML = inStock.map(row).join('') +
+    (oos.length ? `<tr class="inv-oos-divider"><td colspan="7">Out of stock — ${oos.length} item${oos.length !== 1 ? 's' : ''}</td></tr>` + oos.map(row).join('') : '');
 }
 
 function toggleRowSelect(bc, ch) { if(ch) selectedRows.add(bc); else selectedRows.delete(bc); updateBulkBar(); }
@@ -948,9 +954,12 @@ function bulkDelete() {
 }
 function adjustStock(bc, delta) {
   const p=products.find(x=>x.barcode===bc); if(!p)return;
+  const wasOut=(p.stock||0)<=0;
   p.stock=Math.max(0,p.stock+delta);
   const el=document.getElementById('qty-'+bc); if(el) el.textContent=p.stock;
   save('STOCK_ADJUST',{barcode:bc,stock:p.stock}); renderStats();
+  // crossing the sold-out boundary moves the row between sections
+  if (wasOut !== ((p.stock||0)<=0)) renderInventory();
 }
 function deleteProduct(bc) {
   if(!confirm('Delete?'))return;
@@ -1166,8 +1175,11 @@ function renderCashierSold(q) {
 // ── LABELS ──
 function renderLabelList(q) {
   const list = document.getElementById('label-list');
-  if (!products.length) { list.innerHTML='<div class="empty-state"><span class="empty-icon">🏷️</span><div class="empty-title">No products</div></div>'; updateLabelBadge(); return; }
-  const f = q ? products.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.brand.toLowerCase().includes(q.toLowerCase())) : products;
+  // out-of-stock items are excluded — no point printing labels for units you
+  // don't have (restock them first and they reappear here)
+  const avail = products.filter(p => (p.stock || 0) > 0);
+  if (!avail.length) { list.innerHTML='<div class="empty-state"><span class="empty-icon">🏷️</span><div class="empty-title">No in-stock products</div><div class="empty-sub">Out-of-stock items are hidden from label printing</div></div>'; updateLabelBadge(); return; }
+  const f = q ? avail.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.brand.toLowerCase().includes(q.toLowerCase())) : avail;
   list.innerHTML = f.map(p => `
     <div class="label-row" id="lr-${p.barcode}">
       <input type="checkbox" class="label-row-check" id="lc-${p.barcode}" onchange="onLabelCheck('${p.barcode}')">
@@ -1327,7 +1339,8 @@ function clearHistory() { if(!confirm('Clear ALL history?'))return; sales=[]; sa
 // History has two mutually-exclusive report modes (per spec):
 //   events → Physical sales only (grouped by event, incl. Walk-in); excludes Online
 //   online → Online sales only (grouped/filtered by platform); excludes Physical
-let histMode = 'events';
+// Defaults to online — that's where most sales happen.
+let histMode = 'online';
 function setHistMode(mode) {
   histMode = mode;
   document.querySelectorAll('#hist-mode-row .saletype-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));

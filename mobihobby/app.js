@@ -378,18 +378,71 @@ function _discNeedsApproval(sub, val, type) {
   return pct > CASHIER_DISC_LIMIT_PCT;
 }
 
+// Scan input doubles as a search bar: exact barcode first, then name/brand
+// text match (single hit adds straight to cart, several hits show a tap-to-
+// pick list). Shared by the Sell tab and the cashier lock screen.
 function scanSell() {
   const inp = document.getElementById('sell-input');
-  const bc = inp.value.trim(); inp.value = ''; inp.focus();
-  if (!bc) { showMsg('sell-msg','Nothing scanned','err'); beepErr(); return; }
-  const p = products.find(x => x.barcode === bc);
-  if (!p) { showMsg('sell-msg','Not found: '+bc,'err'); beepErr(); return; }
-  const ex = sellCart.find(c => c.barcode === bc);
+  const q = inp.value.trim(); inp.value = ''; inp.focus();
+  _sellSubmit(q, false);
+}
+function _sellMsg(isLock, t, k) { isLock ? lockMsg(t, k) : showMsg('sell-msg', t, k); }
+function _sellSubmit(q, isLock) {
+  _hideSuggest(isLock);
+  if (!q) { _sellMsg(isLock, 'Nothing scanned', 'err'); beepErr(); return; }
+  let p = products.find(x => x.barcode === q);
+  if (!p) {
+    const m = _nameMatches(q);
+    if (m.length === 1) p = m[0];
+    else if (m.length > 1) { _showSuggest(m, isLock); _sellMsg(isLock, `${m.length} matches for “${q}” — tap one`, 'ok'); return; }
+  }
+  if (!p) { _sellMsg(isLock, 'Not found: ' + q, 'err'); beepErr(); return; }
+  _cartAdd(p, isLock);
+}
+function _nameMatches(q) {
+  q = q.toLowerCase();
+  return products.filter(p => p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q)).slice(0, 6);
+}
+function _cartAdd(p, isLock) {
+  const ex = sellCart.find(c => c.barcode === p.barcode);
   // hard sold-out block — robust to missing/zero/NaN stock (no silent add)
-  if ((p.stock || 0) <= 0) { showMsg('sell-msg',p.name+' — Item is sold out','err'); beepErr(); return; }
-  if ((ex ? ex.qty : 0) >= p.stock) { showMsg('sell-msg',p.name+' — no more stock available','err'); beepErr(); return; }
+  if ((p.stock || 0) <= 0) { _sellMsg(isLock, p.name + ' — Item is sold out', 'err'); beepErr(); return; }
+  if ((ex ? ex.qty : 0) >= p.stock) { _sellMsg(isLock, p.name + ' — no more stock available', 'err'); beepErr(); return; }
   if (ex) { ex.qty++; } else { sellCart.push({ barcode:p.barcode, name:p.name, brand:p.brand, scale:p.scale, price:p.price, discPrice:undefined, qty:1, img:p.img||null }); }
-  beepOk(); showLastScan(p, ex?ex.qty:1); renderSellCart(); showMsg('sell-msg','','ok');
+  beepOk();
+  if (isLock) { lockShowLastScan(p, ex ? ex.qty : 1); lockRenderCart(); lockMsg('', 'ok'); }
+  else { showLastScan(p, ex ? ex.qty : 1); renderSellCart(); showMsg('sell-msg', '', 'ok'); }
+}
+// Live suggestions while typing a name. Barcode-looking input (digits / MH…)
+// is skipped so scanner bursts don't flash a list.
+function sellSuggestInput(isLock) {
+  const inp = document.getElementById(isLock ? 'lock-scan-input' : 'sell-input'); if (!inp) return;
+  const q = inp.value.trim();
+  if (q.length < 2 || /^\d+$/.test(q) || /^MH\d*$/i.test(q)) { _hideSuggest(isLock); return; }
+  const m = _nameMatches(q);
+  if (!m.length) { _hideSuggest(isLock); return; }
+  _showSuggest(m, isLock);
+}
+function _showSuggest(list, isLock) {
+  const el = document.getElementById(isLock ? 'lock-suggest' : 'sell-suggest'); if (!el) return;
+  el.innerHTML = list.map(p => `
+    <div class="suggest-row" onclick="pickSuggest('${p.barcode}',${isLock})">
+      ${p.img ? `<img class="ls-img" src="${p.img}" alt="">` : '<div class="ls-ph">🚗</div>'}
+      <div style="flex:1;min-width:0"><div class="suggest-name">${p.name}</div><div class="suggest-sub">${p.brand} · ${p.scale} · RM ${p.price.toFixed(2)}</div></div>
+      <span class="suggest-stock ${p.stock > 0 ? '' : 'out'}">${p.stock > 0 ? p.stock + ' in stock' : 'Sold out'}</span>
+    </div>`).join('');
+  el.classList.add('show');
+}
+function _hideSuggest(isLock) {
+  const el = document.getElementById(isLock ? 'lock-suggest' : 'sell-suggest');
+  if (el) { el.classList.remove('show'); el.innerHTML = ''; }
+}
+function pickSuggest(bc, isLock) {
+  const p = products.find(x => x.barcode === bc); if (!p) return;
+  _hideSuggest(isLock);
+  const inp = document.getElementById(isLock ? 'lock-scan-input' : 'sell-input');
+  if (inp) { inp.value = ''; inp.focus(); }
+  _cartAdd(p, isLock);
 }
 
 // Lock-screen status message (was referenced everywhere but never defined —
@@ -404,16 +457,8 @@ function lockMsg(text, type) {
 
 function lockScan() {
   const inp = document.getElementById('lock-scan-input');
-  const bc = inp.value.trim(); inp.value = ''; inp.focus();
-  if (!bc) { lockMsg('Nothing scanned','err'); beepErr(); return; }
-  const p = products.find(x => x.barcode === bc);
-  if (!p) { lockMsg('Not found: '+bc,'err'); beepErr(); return; }
-  const ex = sellCart.find(c => c.barcode === bc);
-  // hard sold-out block — robust to missing/zero/NaN stock (no silent add)
-  if ((p.stock || 0) <= 0) { lockMsg(p.name+' — Item is sold out','err'); beepErr(); return; }
-  if ((ex?ex.qty:0) >= p.stock) { lockMsg(p.name+' — no more stock available','err'); beepErr(); return; }
-  if (ex) { ex.qty++; } else { sellCart.push({ barcode:p.barcode, name:p.name, brand:p.brand, scale:p.scale, price:p.price, discPrice:undefined, qty:1, img:p.img||null }); }
-  beepOk(); lockShowLastScan(p, ex?ex.qty:1); lockRenderCart(); lockMsg('','ok');
+  const q = inp.value.trim(); inp.value = ''; inp.focus();
+  _sellSubmit(q, true);
 }
 
 let lastScanTimer = null;
@@ -1820,6 +1865,71 @@ function poToggleMenu(e, id) {
 }
 document.addEventListener('click', poCloseMenus);
 
+// ── PHOTO WATERMARK (fixed house style on purpose — logo bottom-right,
+//    35% opacity, width 22% of the photo; nothing is adjustable) ──
+let _wmLogoImg = null, _wmResults = [];
+function _wmLoadLogo() {
+  return new Promise((resolve, reject) => {
+    if (_wmLogoImg) return resolve(_wmLogoImg);
+    const img = new Image();
+    img.onload = () => { _wmLogoImg = img; resolve(img); };
+    img.onerror = () => {
+      const fb = new Image();
+      fb.onload = () => { _wmLogoImg = fb; resolve(fb); };
+      fb.onerror = () => reject(new Error('logo missing'));
+      fb.src = MH_LOGO_FALLBACK;
+    };
+    img.src = MH_LOGO_SRC;
+  });
+}
+function openWatermark() { _wmResults = []; _wmRenderGrid(); poOpen('wm-modal'); }
+async function handleWmFiles(input) {
+  const files = [...(input.files || [])]; input.value = '';
+  if (!files.length) return;
+  let logo;
+  try { logo = await _wmLoadLogo(); } catch (e) { poToast('Logo not found — put your logo at assets/logo.png'); return; }
+  for (const f of files) {
+    try { _wmResults.push(await _wmProcess(f, logo)); }
+    catch (e) { poToast('Skipped ' + (f.name || 'file') + ' — not a readable image'); }
+  }
+  _wmRenderGrid();
+}
+function _wmProcess(file, logo) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(img.src);
+      // cap the long edge at 1600px — plenty for social posts, keeps files light
+      const MAX = 1600; let w = img.width, h = img.height;
+      if (Math.max(w, h) > MAX) { const s = MAX / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      const ctx = cv.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      const lw = w * .22, lh = lw * (logo.height / logo.width), m = w * .03;
+      ctx.globalAlpha = .35;
+      ctx.drawImage(logo, w - lw - m, h - lh - m, lw, lh);
+      ctx.globalAlpha = 1;
+      const base = (file.name || 'photo').replace(/\.[^.]+$/, '');
+      resolve({ name: base + '_wm.jpg', url: cv.toDataURL('image/jpeg', .9) });
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+function _wmRenderGrid() {
+  const g = document.getElementById('wm-grid'); if (!g) return;
+  g.innerHTML = _wmResults.map((r, i) => `<img src="${r.url}" alt="" title="Tap to download" onclick="wmDownloadOne(${i})">`).join('');
+  const btn = document.getElementById('wm-dl-btn');
+  if (btn) { btn.disabled = !_wmResults.length; btn.textContent = _wmResults.length ? `⬇ Download all (${_wmResults.length})` : '⬇ Download all'; }
+}
+function _wmSave(r) { const a = document.createElement('a'); a.href = r.url; a.download = r.name; a.click(); }
+function wmDownloadOne(i) { if (_wmResults[i]) _wmSave(_wmResults[i]); }
+function wmDownloadAll() {
+  // small stagger — browsers drop rapid-fire downloads
+  _wmResults.forEach((r, i) => setTimeout(() => _wmSave(r), i * 250));
+  poToast(`Downloading ${_wmResults.length} watermarked photo(s)…`);
+}
+
 // ── selection ──
 function poSelectCustomer(id) { poSel = { customerId: id, batchId: null }; renderPreorders(); }
 function poSelectBatch(id) { poSel = { customerId: null, batchId: id }; renderPreorders(); }
@@ -1864,15 +1974,14 @@ function archiveCompletedBatches() {
 
 // ── render ──
 function renderPreorders() { renderPoDash(); renderPoModels(); renderPoCustomers(_poVal('po-search')); renderPoDetail(); }
+// Compact toolbar summary — the old 7-card dashboard made the page bottom-heavy.
+// Only the money that matters stays: outstanding balance + deposits held.
 function renderPoDash() {
   const el = document.getElementById('po-dash'); if (!el) return;
   const act = poItems.filter(i => i.status !== 'Cancelled');
-  const n = s => act.filter(i => i.status === s).length;
   const out = act.filter(poIsActive).reduce((a, i) => a + poItemOutstanding(i), 0);
   const dep = act.reduce((a, i) => a + (Number(i.depositPaid) || 0), 0);
-  const cards = [['Waiting', n('Waiting Stock'), ''], ['Arrived', n('Arrived'), ''], ['Awaiting Pay', n('Awaiting Payment'), ''],
-    ['Ready', n('Ready To Ship'), ''], ['Completed', n('Completed'), ''], ['Outstanding', 'RM ' + out.toFixed(0), 'accent'], ['Deposits', 'RM ' + dep.toFixed(0), 'accent']];
-  el.innerHTML = cards.map(([l, v, c]) => `<div class="stat-card ${c}"><div class="stat-label">${l}</div><div class="stat-value">${v}</div></div>`).join('');
+  el.innerHTML = `<span>Outstanding <b class="po-sum-due">RM ${out.toFixed(0)}</b></span><span>Deposits <b>RM ${dep.toFixed(0)}</b></span>`;
 }
 function renderPoModels() {
   const el = document.getElementById('po-models'); if (!el) return;

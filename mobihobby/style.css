@@ -41,10 +41,12 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--
 .sidebar-logo .brand .mh-logo-mark{height:1.7em}
 .lock-logo .mh-logo-mark{height:1.3em}
 /* full lockup image (sidebar + lock) — your PNG includes the wordmark.
-   Sized in CSS px from a 1254px source, so it stays sharp on high-DPI. */
+   The asset is trimmed to its artwork (no transparent border), so the CSS
+   height is the real visible size and taglines sit tight underneath.
+   Sized in CSS px from a ~950px source, so it stays sharp on high-DPI. */
 .mh-logo-full{width:auto;max-width:100%;display:block}
-.sidebar-logo .brand .mh-logo-full{height:144px;margin:0 auto}
-.lock-logo .mh-logo-full{height:62px;margin:0 auto}
+.sidebar-logo .brand .mh-logo-full{height:72px;margin:0 auto}
+.lock-logo .mh-logo-full{height:72px;margin:0 auto}
 /* graceful fallback badge if the asset is missing (no broken-image icon) */
 .mh-logo-fallback{display:inline-flex;align-items:center;justify-content:center;height:1.7em;aspect-ratio:1;border-radius:6px;background:#E58A0E;color:#fff;font-weight:800;font-size:.8em;flex-shrink:0;vertical-align:middle}
 /* collapse-aware: in a collapsed sidebar, hide the wordmark, keep the mark centred */
@@ -123,8 +125,8 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--
 /* ── CASHIER LOCK SCREEN (light — mirrors Sell) ── */
 #cashier-lock{display:none;position:fixed;inset:0;background:var(--bg);z-index:2000;flex-direction:column;align-items:center;justify-content:flex-start;overflow-y:auto;padding:22px 16px}
 #cashier-lock.show{display:flex}
-.lock-logo{margin-bottom:2px;display:flex;align-items:center;justify-content:center;gap:12px}
-.lock-logo .mh-logo-full{height:60px}
+.lock-logo{margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:12px}
+.lock-logo .mh-logo-full{height:72px}
 .lock-tagline{font-size:12px;color:var(--text-3);margin-bottom:4px}
 .lock-device{font-size:10px;color:var(--text-3);margin-bottom:16px;font-family:monospace}
 .lock-sell-area{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px;width:min(760px,96vw);box-shadow:var(--shadow)}
@@ -187,6 +189,15 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--
 .scan-input:focus{outline:none;border-color:rgba(255,255,255,.75);box-shadow:0 0 0 4px rgba(255,255,255,.12)}
 .scan-btn{width:48px;height:48px;border-radius:50%;background:#fff;color:var(--blue);border:none;font-size:24px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:transform .15s}
 .scan-btn:active{transform:scale(.93)}
+/* name-search suggestions under the scan bars (Sell + cashier lock) */
+.scan-suggest{display:none;flex-direction:column;gap:6px;margin-bottom:10px}
+.scan-suggest.show{display:flex;animation:slideIn .15s ease}
+.suggest-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);cursor:pointer;transition:.12s}
+.suggest-row:hover{border-color:var(--blue);background:var(--blue-ice)}
+.suggest-name{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.suggest-sub{font-size:11px;color:var(--text-3)}
+.suggest-stock{font-size:11px;font-weight:700;color:var(--blue);background:var(--blue-pale);padding:2px 8px;border-radius:var(--radius-pill);white-space:nowrap;flex-shrink:0}
+.suggest-stock.out{color:var(--danger);background:var(--danger-bg)}
 .last-scan{display:none;align-items:center;gap:12px;background:var(--blue-pale);border:1.5px solid var(--blue-border);border-radius:var(--radius);padding:10px 14px;margin-bottom:10px}
 .last-scan.show{display:flex;animation:slideIn .2s ease}
 .ls-img{width:38px;height:38px;border-radius:7px;object-fit:cover;flex-shrink:0}
@@ -460,7 +471,15 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:var(--
 .hist-mode-row .saletype-btn{flex:1}
 
 /* ── PRE-ORDER MODULE V2 ── */
-.po-toolbar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.po-toolbar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
+/* compact money summary in the toolbar (replaces the old dashboard cards) */
+.po-toolbar-sum{margin-left:auto;display:flex;gap:14px;align-items:center;font-size:12px;font-weight:600;color:var(--text-3);white-space:nowrap}
+.po-toolbar-sum b{color:var(--text);font-weight:800}
+.po-toolbar-sum .po-sum-due{color:var(--danger)}
+/* watermark preview grid */
+.wm-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;max-height:40vh;overflow-y:auto}
+.wm-grid img{width:100%;border-radius:8px;cursor:pointer;display:block}
+.wm-grid img:hover{outline:2px solid var(--blue)}
 .po-section-title{font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin:6px 0 10px}
 .po-empty{text-align:center;padding:24px 14px;color:var(--text-3);font-size:13px}
 #po-dash{margin-bottom:18px}

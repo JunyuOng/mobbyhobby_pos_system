@@ -15,11 +15,12 @@
   <div class="lock-device" id="lock-device-id"></div>
   <div class="lock-sell-area">
     <div class="lock-event" id="lock-event-name">No event selected</div>
-    <div class="lock-scan-label">Scan item barcode</div>
+    <div class="lock-scan-label">Scan barcode or search by name</div>
     <div class="lock-scan-wrap">
-      <input class="lock-scan-input" id="lock-scan-input" placeholder="Scan or type barcode…" autocomplete="off" inputmode="numeric" onkeydown="if(event.key==='Enter')lockScan()">
+      <input class="lock-scan-input" id="lock-scan-input" placeholder="Scan barcode or type item name…" autocomplete="off" onkeydown="if(event.key==='Enter')lockScan()" oninput="sellSuggestInput(true)">
       <button class="lock-scan-btn" onclick="lockScan()">+</button>
     </div>
+    <div class="scan-suggest" id="lock-suggest"></div>
     <div class="lock-last-scan" id="lock-last-scan">
       <div id="lock-ls-img"></div>
       <div style="flex:1;min-width:0"><div class="lock-ls-name" id="lock-ls-name"></div><div class="lock-ls-sub" id="lock-ls-sub"></div></div>
@@ -117,12 +118,13 @@
           <button class="btn btn-ghost btn-sm" onclick="openEventsModal()">📅 Manage events</button>
         </div>
         <div class="scan-hero">
-          <div class="scan-hero-label">Scan item barcode</div>
+          <div class="scan-hero-label">Scan barcode or search by name</div>
           <div class="scan-wrap">
-            <input class="scan-input" id="sell-input" placeholder="Scan or type barcode…" autocomplete="off" inputmode="numeric" onkeydown="if(event.key==='Enter')scanSell()">
+            <input class="scan-input" id="sell-input" placeholder="Scan barcode or type item name…" autocomplete="off" onkeydown="if(event.key==='Enter')scanSell()" oninput="sellSuggestInput(false)">
             <button class="scan-btn" onclick="scanSell()">+</button>
           </div>
         </div>
+        <div class="scan-suggest" id="sell-suggest"></div>
         <div class="last-scan" id="last-scan">
           <div id="ls-img-wrap"></div>
           <div style="flex:1;min-width:0"><div class="ls-name" id="ls-name"></div><div class="ls-sub" id="ls-sub"></div></div>
@@ -291,13 +293,14 @@
       <div class="panel" id="panel-preorders">
         <div class="po-toolbar">
           <button class="btn btn-primary btn-sm" onclick="openPoBatch()">＋ New Batch</button>
+          <button class="btn btn-outline btn-sm" onclick="openWatermark()">🖼 Watermark</button>
           <button class="btn btn-outline btn-sm" onclick="document.getElementById('po-import-file').click()">⬆ Import</button>
           <button class="btn btn-outline btn-sm" onclick="openExport()">⬇ Export</button>
           <button class="btn btn-outline btn-sm" onclick="archiveCompletedBatches()">🗄 Archive completed</button>
           <button class="btn btn-outline btn-sm" id="po-arch-toggle" onclick="togglePoArchived()">🗄 Archived</button>
           <input type="file" id="po-import-file" accept=".json,application/json" style="display:none" onchange="poImport(this)">
+          <span class="po-toolbar-sum" id="po-dash"></span>
         </div>
-        <div class="stat-grid" id="po-dash"></div>
         <div class="po-section-title" id="po-models-title">Models</div>
         <div class="po-models" id="po-models"></div>
         <div class="po-board">
@@ -390,6 +393,23 @@
     </div>
   </div>
 </div>
+
+<!-- ══ WATERMARK MODAL (opened from Pre-orders toolbar) ══ -->
+<div class="po-ovl" id="wm-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Watermark photos</h3>
+  <div class="po-modal-sub">Stamps your logo bottom-right on every photo (35% opacity, fixed size) — ready for posts. Tap a preview to download just that one.</div>
+  <div class="import-drop">
+    <span class="import-drop-icon">🖼</span>
+    <div style="font-weight:600;color:var(--text);margin-bottom:4px">Tap to add photos</div>
+    <div style="font-size:12px;color:var(--text-3)">You can select multiple at once</div>
+    <input type="file" accept="image/*" multiple onchange="handleWmFiles(this)">
+  </div>
+  <div class="wm-grid" id="wm-grid"></div>
+  <div class="po-modal-actions">
+    <button class="btn btn-outline" onclick="poClose('wm-modal')">Close</button>
+    <button class="btn btn-primary" id="wm-dl-btn" onclick="wmDownloadAll()" disabled>⬇ Download all</button>
+  </div>
+</div></div>
 
 <!-- ══ EVENTS MODAL (opened from Sell tab / topbar event chip) ══ -->
 <div class="po-ovl" id="events-modal"><div class="po-modal">

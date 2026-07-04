@@ -13,6 +13,8 @@ let receiptCounter = parseInt(localStorage.getItem('mhf_rc') || '0');
 let customers = JSON.parse(localStorage.getItem('mhf_cust') || '[]');
 let poBatches = JSON.parse(localStorage.getItem('mhf_pob')  || '[]');
 let poItems   = JSON.parse(localStorage.getItem('mhf_poi')  || '[]');
+// Reservations: holds on IN-STOCK items (units leave sellable stock while held)
+let reservations = JSON.parse(localStorage.getItem('mhf_resv') || '[]');
 
 // expose for sync.js
 window.products  = products;
@@ -21,6 +23,7 @@ window.events    = events;
 window.customers = customers;
 window.poBatches = poBatches;
 window.poItems   = poItems;
+window.reservations = reservations;
 
 function _localSave() {
   try {
@@ -31,6 +34,7 @@ function _localSave() {
     localStorage.setItem('mhf_cust', JSON.stringify(customers));
     localStorage.setItem('mhf_pob',  JSON.stringify(poBatches));
     localStorage.setItem('mhf_poi',  JSON.stringify(poItems));
+    localStorage.setItem('mhf_resv', JSON.stringify(reservations));
   } catch(e) { if (typeof poToast === 'function') poToast('Storage full — changes may not persist'); }
 }
 window._localSave = _localSave;
@@ -915,11 +919,11 @@ function renderInventory() {
   // labelled section at the bottom (dimmed, still restockable/editable).
   const inStock = f.filter(p => (p.stock || 0) > 0);
   const oos     = f.filter(p => (p.stock || 0) <= 0);
-  const row = p => { const out = (p.stock || 0) <= 0; return `
+  const row = p => { const out = (p.stock || 0) <= 0; const held = resvUnitsFor(p.barcode); return `
     <tr class="${out ? 'inv-oos' : ''}">
       <td><input type="checkbox" class="sel-check" id="ichk-${p.barcode}" onchange="toggleRowSelect('${p.barcode}',this.checked)"></td>
       <td>${p.img ? `<img class="thumb" src="${p.img}" alt="">` : `<div class="thumb-ph">🚗</div>`}</td>
-      <td><div class="prod-name">${p.name}${out ? ' <span class="oos-pill">Sold out</span>' : ''}</div><div class="prod-bc">${p.barcode}</div></td>
+      <td><div class="prod-name">${p.name}${out ? ' <span class="oos-pill">Sold out</span>' : ''}${held ? ` <span class="resv-pill">${held} reserved</span>` : ''}</div><div class="prod-bc">${p.barcode}</div></td>
       <td style="font-size:12px;color:var(--text-2)">${p.brand}<br><span style="color:var(--text-3);font-size:11px">${p.scale}</span></td>
       <td style="font-weight:700;color:var(--blue)">RM ${p.price.toFixed(2)}</td>
       <td><div class="stepper">
@@ -928,12 +932,14 @@ function renderInventory() {
         <button class="stepper-btn" onclick="adjustStock('${p.barcode}',1)">+</button>
       </div></td>
       <td><div class="action-cell">
+        ${out ? '' : `<button class="btn btn-outline btn-sm" onclick="openReserve('${p.barcode}')" title="Reserve for a customer">🔖</button>`}
         <button class="btn btn-ghost btn-sm" onclick="editProduct('${p.barcode}')">Edit</button>
         <button class="btn btn-danger btn-sm" onclick="requirePin(()=>deleteProduct('${p.barcode}'))">✕</button>
       </div></td>
     </tr>`; };
   document.getElementById('inv-body').innerHTML = inStock.map(row).join('') +
     (oos.length ? `<tr class="inv-oos-divider"><td colspan="7">Out of stock — ${oos.length} item${oos.length !== 1 ? 's' : ''}</td></tr>` + oos.map(row).join('') : '');
+  updateResvBadge();
 }
 
 function toggleRowSelect(bc, ch) { if(ch) selectedRows.add(bc); else selectedRows.delete(bc); updateBulkBar(); }
@@ -966,6 +972,152 @@ function deleteProduct(bc) {
   products=products.filter(p=>p.barcode!==bc);
   save('PRODUCT_DELETE',{barcode:bc}); renderInventory(); renderStats();
 }
+// ── RESERVATIONS ──
+// Reserving deducts the units from sellable stock immediately (so they can't
+// be scanned/sold twice or show as available). "✓ Sold" converts the hold
+// into a normal sale record (stock already deducted — no double deduction);
+// "✕ Cancel" returns the units to stock. Each reservation snapshots the
+// product (name/price/img) so it stays readable even if the product changes.
+let _resvBarcode = null, _resvReceiptId = null;
+function resvUnitsFor(bc) { return reservations.filter(r => r.barcode === bc).reduce((a, r) => a + (r.qty || 0), 0); }
+function updateResvBadge() {
+  const b = document.getElementById('resv-btn'); if (!b) return;
+  b.textContent = reservations.length ? `🔖 Reservations (${reservations.length})` : '🔖 Reservations';
+}
+function openReserve(bc) {
+  const p = products.find(x => x.barcode === bc); if (!p) return;
+  if ((p.stock || 0) <= 0) { poToast('No stock available to reserve'); return; }
+  _resvBarcode = bc;
+  document.getElementById('resv-prod').innerHTML =
+    `<b>${_esc(p.name)}</b><br><span style="font-size:12px;color:var(--text-3)">${_esc(p.brand)} · ${_esc(p.scale)} · RM ${p.price.toFixed(2)} · ${p.stock} in stock</span>`;
+  ['resv-name', 'resv-phone', 'resv-deposit', 'resv-notes'].forEach(id => _poSet(id, ''));
+  _poSet('resv-qty', '1');
+  document.getElementById('resv-msg').innerHTML = '';
+  poOpen('resv-modal');
+  setTimeout(() => { const i = document.getElementById('resv-name'); if (i) i.focus(); }, 100);
+}
+function saveReservation() {
+  const p = products.find(x => x.barcode === _resvBarcode); if (!p) return;
+  const name = _poVal('resv-name').trim();
+  if (!name) { showMsg('resv-msg', 'Customer name is required', 'err'); return; }
+  const qty = Math.max(1, parseInt(_poVal('resv-qty')) || 1);
+  if (qty > (p.stock || 0)) { showMsg('resv-msg', `Only ${p.stock} in stock`, 'err'); return; }
+  const r = { id: 'rsv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    no: 'R' + Date.now().toString(36).slice(-5).toUpperCase(),
+    barcode: p.barcode, prodName: p.name, brand: p.brand, scale: p.scale, price: p.price,
+    qty, customer: name, phone: _poVal('resv-phone').trim(),
+    deposit: parseFloat(_poVal('resv-deposit')) || 0, notes: _poVal('resv-notes').trim(),
+    img: p.img || null, createdAt: new Date().toLocaleString('en-MY'), timestamp: Date.now() };
+  p.stock = Math.max(0, p.stock - qty);
+  save('STOCK_ADJUST', { barcode: p.barcode, stock: p.stock });
+  reservations.unshift(r); save('RESV_UPSERT', r);
+  poClose('resv-modal');
+  renderInventory(); renderStats();
+  poToast(`Reserved ${qty}× ${p.name} for ${name}`);
+}
+function openReservations() { renderReservations(); poOpen('resv-list-modal'); }
+function renderReservations() {
+  updateResvBadge();
+  const el = document.getElementById('resv-list'); if (!el) return;
+  if (!reservations.length) {
+    el.innerHTML = '<div class="empty-state"><span class="empty-icon">🔖</span><div class="empty-title">No reservations</div><div class="empty-sub">Use the 🔖 button on an inventory row to hold a car for a customer</div></div>';
+    return;
+  }
+  el.innerHTML = reservations.map(r => {
+    const total = r.price * r.qty, bal = Math.max(0, total - (r.deposit || 0));
+    return `<div class="resv-row">
+      ${r.img ? `<img class="sold-thumb" src="${r.img}" alt="">` : '<div class="sold-ph">🚗</div>'}
+      <div class="resv-info">
+        <div class="resv-name">${_esc(r.prodName)} ×${r.qty} <span class="resv-no">#${r.no || ''}</span></div>
+        <div class="resv-sub">👤 ${_esc(r.customer)}${r.phone ? ' · 📞 ' + _esc(r.phone) : ''} · ${_esc((r.createdAt || '').split(',')[0])}</div>
+        <div class="resv-sub">Deposit <b>RM ${(r.deposit || 0).toFixed(2)}</b> · Balance <b class="resv-due">RM ${bal.toFixed(2)}</b>${r.notes ? ' · 📝 ' + _esc(r.notes) : ''}</div>
+      </div>
+      <div class="resv-actions">
+        <button class="btn btn-ghost btn-sm" onclick="openResvReceipt('${r.id}')">📋 Receipt</button>
+        <button class="btn btn-primary btn-sm" onclick="resvMarkSold('${r.id}')">✓ Sold</button>
+        <button class="btn btn-danger btn-sm" onclick="resvCancel('${r.id}')" title="Cancel & return to stock">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function resvMarkSold(id) {
+  const r = reservations.find(x => x.id === id); if (!r) return;
+  const total = r.price * r.qty;
+  poConfirm(`Complete the deal — mark <b>${_esc(r.prodName)} ×${r.qty}</b> as sold to <b>${_esc(r.customer)}</b> for <b>RM ${total.toFixed(2)}</b>?`, () => {
+    const rNo = nextReceiptNo(); const now = Date.now();
+    const salesType = poDefaultSaleType(); const ev = getActiveEvent();
+    const rec = { id: 's_' + now, receiptNo: rNo, receiptNumber: rNo,
+      date: new Date().toLocaleString('en-MY'), timestamp: now,
+      items: r.prodName + ' ×' + r.qty,
+      arr: [{ barcode: r.barcode, name: r.prodName, brand: r.brand, scale: r.scale, price: r.price, discPrice: undefined, qty: r.qty, img: r.img || null }],
+      subtotal: total.toFixed(2), discount: '0.00', discType: 'rm', total: total.toFixed(2),
+      paymentMethod: 'Cash', customer: r.customer,
+      salesType, event: salesType === 'Physical' ? (ev ? ev.name : 'No event') : ONLINE_EVENT,
+      platform: salesType === 'Online' ? 'Other' : 'None',
+      eventId: salesType === 'Physical' && ev ? ev.id : null,
+      eventName: salesType === 'Physical' ? (ev ? ev.name : 'No event') : '',
+      cashier: (window.SyncEngine && window.SyncEngine.deviceId) || 'Cashier',
+      fromReservation: r.no || r.id };
+    sales.unshift(rec); save('SALE', rec);
+    // Stock was already deducted when the reservation was made. Remote devices
+    // deduct again on the SALE event, so follow with an absolute STOCK_ADJUST
+    // (ordered after the sale) to correct them; local stock is untouched.
+    const p = products.find(x => x.barcode === r.barcode);
+    if (p) save('STOCK_ADJUST', { barcode: p.barcode, stock: p.stock });
+    save('RESV_UPSERT', { id, _deleted: true });
+    renderReservations(); renderInventory(); renderStats();
+    showReceipt(rec);
+  });
+}
+function resvCancel(id) {
+  const r = reservations.find(x => x.id === id); if (!r) return;
+  poConfirm(`Cancel this reservation for <b>${_esc(r.customer)}</b> and return ${r.qty} unit(s) to stock?` +
+    ((r.deposit || 0) > 0 ? `<br><span style="font-size:12px;color:var(--text-3)">Deposit RM ${r.deposit.toFixed(2)} was collected — handle any refund yourself.</span>` : ''), () => {
+    const p = products.find(x => x.barcode === r.barcode);
+    if (p) { p.stock = (p.stock || 0) + r.qty; save('STOCK_ADJUST', { barcode: p.barcode, stock: p.stock }); }
+    save('RESV_UPSERT', { id, _deleted: true });
+    renderReservations(); renderInventory(); renderStats();
+    poToast('Reservation cancelled — stock returned');
+  });
+}
+// reservation slip (same copy-text house style as receipts/invoices)
+function resvReceiptText(r) {
+  const R = '—'.repeat(17), L = [];
+  const total = r.price * r.qty, bal = Math.max(0, total - (r.deposit || 0));
+  L.push('🔖 MobiHobby');
+  L.push('Reservation Slip');
+  L.push(R);
+  L.push('Reservation #' + (r.no || '—'));
+  L.push(r.createdAt || '');
+  L.push('Customer: ' + r.customer);
+  if (r.phone) L.push('Phone: ' + r.phone);
+  L.push(R);
+  L.push('1. ' + r.prodName);
+  L.push('   ' + r.brand + ' · ' + r.scale);
+  L.push(`   ${r.qty} × ${_money(r.price)} = ${_money(total)}`);
+  L.push(R);
+  L.push('Deposit paid  ' + _money(r.deposit || 0));
+  L.push('BALANCE DUE   ' + _money(bal));
+  L.push(R);
+  if (r.notes) { L.push('📝 ' + r.notes); L.push(R); }
+  L.push('🚗 This unit is reserved & held');
+  L.push('just for you. Kindly settle the');
+  L.push('balance to complete the deal.');
+  L.push('Thank you for choosing MobiHobby! 🙏');
+  return L.join('\n');
+}
+function openResvReceipt(id) {
+  const r = reservations.find(x => x.id === id); if (!r) return;
+  _resvReceiptId = id;
+  document.getElementById('resv-receipt-text').textContent = resvReceiptText(r);
+  poOpen('resv-receipt-modal');
+}
+async function copyResvReceipt(btn) {
+  const r = reservations.find(x => x.id === _resvReceiptId); if (!r) return;
+  const ok = await copyToClipboard(resvReceiptText(r));
+  if (btn) { const o = btn.textContent; btn.textContent = ok ? '✓ Copied' : '⚠ Failed'; setTimeout(() => { btn.textContent = o; }, 1600); }
+}
+
 // ── ADD/EDIT (modal on the Inventory page) ──
 // Add Item and Edit share the same form; the modal closes itself after a
 // successful save and the inventory list refreshes in place — no tab switch.
@@ -2196,6 +2348,7 @@ window.addEventListener('mh_data_updated', () => {
   if (currentTab === 'preorders') { renderPreorders(); }
   // keep the open modals/overlays live too
   if (document.getElementById('events-modal')?.classList.contains('open')) renderEventList();
+  if (document.getElementById('resv-list-modal')?.classList.contains('open')) renderReservations();
   if (_cashierSoldOpen) renderCashierSold(document.getElementById('cs-search')?.value || '');
 });
 

@@ -223,6 +223,8 @@ const SyncEngine = {
       case 'CUSTOMER_UPSERT': _mhUpsertById(customers, event.data); _localSave(); break;
       case 'POBATCH_UPSERT':  _mhUpsertById(poBatches, event.data); _localSave(); break;
       case 'POITEM_UPSERT':   _mhUpsertById(poItems,   event.data); _localSave(); break;
+      // ── Reservations (holds on in-stock items) ──
+      case 'RESV_UPSERT':     _mhUpsertById(reservations, event.data); _localSave(); break;
     }
   },
 

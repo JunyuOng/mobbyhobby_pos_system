@@ -882,16 +882,24 @@ async function copyToClipboard(text) {
 
 // ── INVENTORY ──
 let selectedRows = new Set();
+// Stat cards follow the active search/brand/scale filters, so filtering to
+// e.g. Hot Wheels shows that brand's product count, units, value and profit.
 function renderStats() {
-  const ts = products.reduce((a,p) => a+p.stock, 0);
-  const tw = products.reduce((a,p) => a+p.stock*p.price, 0);
-  const cost = products.reduce((a,p) => a+(p.cost||0)*p.stock, 0);
+  const q     = (document.getElementById('inv-q')?.value || '').trim();
+  const brand = document.getElementById('f-brand-filter')?.value || '';
+  const scale = document.getElementById('f-scale-filter')?.value || '';
+  const hasFilter = !!(q || brand || scale);
+  const list = hasFilter ? getFilteredSorted() : products;
+  const suffix = hasFilter ? ` — ${brand || scale || 'search'}${brand && scale ? ' ' + scale : ''}` : '';
+  const ts = list.reduce((a,p) => a+p.stock, 0);
+  const tw = list.reduce((a,p) => a+p.stock*p.price, 0);
+  const cost = list.reduce((a,p) => a+(p.cost||0)*p.stock, 0);
   const profit = tw - cost;
   document.getElementById('stats').innerHTML = `
-    <div class="stat-card accent"><div class="stat-label">Products</div><div class="stat-value">${products.length}</div></div>
-    <div class="stat-card"><div class="stat-label">Total units</div><div class="stat-value">${ts}</div></div>
-    <div class="stat-card"><div class="stat-label">Inventory value</div><div class="stat-value">RM ${tw.toFixed(0)}</div></div>
-    <div class="stat-card accent"><div class="stat-label">Potential profit</div><div class="stat-value">RM ${profit.toFixed(0)}</div></div>`;
+    <div class="stat-card accent"><div class="stat-label">Products${suffix}</div><div class="stat-value">${list.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Total units${suffix}</div><div class="stat-value">${ts}</div></div>
+    <div class="stat-card"><div class="stat-label">Inventory value${suffix}</div><div class="stat-value">RM ${tw.toFixed(0)}</div></div>
+    <div class="stat-card accent"><div class="stat-label">Potential profit${suffix}</div><div class="stat-value">RM ${profit.toFixed(0)}</div></div>`;
 }
 
 function getFilteredSorted() {
@@ -904,10 +912,17 @@ function getFilteredSorted() {
     (!brand || p.brand === brand) && (!scale || p.scale === scale)
   );
   const [col, dir] = sort.split('-');
-  f.sort((a,b) => { let va=a[col],vb=b[col]; if(typeof va==='string'){va=va.toLowerCase();vb=vb.toLowerCase();} return dir==='asc'?(va>vb?1:va<vb?-1:0):(va<vb?1:va>vb?-1:0); });
+  f.sort((a,b) => {
+    let va=a[col],vb=b[col]; if(typeof va==='string'){va=va.toLowerCase();vb=vb.toLowerCase();}
+    const c = dir==='asc'?(va>vb?1:va<vb?-1:0):(va<vb?1:va>vb?-1:0);
+    if (c) return c;
+    // tie-break alphabetically so equal prices/stocks still read A→Z
+    const na=a.name.toLowerCase(), nb=b.name.toLowerCase();
+    return na>nb?1:na<nb?-1:0;
+  });
   return f;
 }
-function applyFilters() { renderInventory(); }
+function applyFilters() { renderInventory(); renderStats(); }
 function cycleSortCol(col) { const sel=document.getElementById('f-sort'); sel.value=col+(sel.value===col+'-asc'?'-desc':'-asc'); applyFilters(); }
 
 function renderInventory() {
@@ -978,42 +993,158 @@ function deleteProduct(bc) {
 // into a normal sale record (stock already deducted — no double deduction);
 // "✕ Cancel" returns the units to stock. Each reservation snapshots the
 // product (name/price/img) so it stays readable even if the product changes.
-let _resvBarcode = null, _resvReceiptId = null;
-function resvUnitsFor(bc) { return reservations.filter(r => r.barcode === bc).reduce((a, r) => a + (r.qty || 0), 0); }
+let _resvReceiptId = null;
+// One reservation can hold MULTIPLE cars for the same customer. Items live in
+// r.items[]; legacy single-car records (top-level barcode/qty) are normalized
+// through resvItems() so old data keeps working.
+function resvItems(r) {
+  return r.items || [{ barcode: r.barcode, prodName: r.prodName, brand: r.brand, scale: r.scale, price: r.price, qty: r.qty || 1, img: r.img || null }];
+}
+function resvTotal(r) { return resvItems(r).reduce((a, i) => a + i.price * i.qty, 0); }
+function resvUnitsFor(bc) { return reservations.reduce((a, r) => a + resvItems(r).filter(i => i.barcode === bc).reduce((b, i) => b + i.qty, 0), 0); }
 function updateResvBadge() {
   const b = document.getElementById('resv-btn'); if (!b) return;
   b.textContent = reservations.length ? `🔖 Reservations (${reservations.length})` : '🔖 Reservations';
 }
+
+// ── create / edit modal (cart of cars) ──
+let _resvCart = [], _resvEditId = null;
+function _resvSnap(p, qty) { return { barcode: p.barcode, prodName: p.name, brand: p.brand, scale: p.scale, price: p.price, qty: qty || 1, img: p.img || null }; }
+// units of this barcode already held by the reservation being edited — they're
+// free to re-use since they'd be returned on save
+function _resvOldQty(bc) {
+  if (!_resvEditId) return 0;
+  const r = reservations.find(x => x.id === _resvEditId);
+  return r ? resvItems(r).filter(i => i.barcode === bc).reduce((a, i) => a + i.qty, 0) : 0;
+}
+function _resvAvail(bc) { const p = products.find(x => x.barcode === bc); return (p ? p.stock || 0 : 0) + _resvOldQty(bc); }
+function _openResvModal() {
+  document.getElementById('resv-msg').innerHTML = '';
+  _poSet('resv-add', '');
+  const s = document.getElementById('resv-suggest'); if (s) { s.classList.remove('show'); s.innerHTML = ''; }
+  renderResvCart();
+  poOpen('resv-modal');
+  setTimeout(() => { const i = document.getElementById('resv-name'); if (i && !i.value) i.focus(); }, 100);
+}
 function openReserve(bc) {
   const p = products.find(x => x.barcode === bc); if (!p) return;
   if ((p.stock || 0) <= 0) { poToast('No stock available to reserve'); return; }
-  _resvBarcode = bc;
-  document.getElementById('resv-prod').innerHTML =
-    `<b>${_esc(p.name)}</b><br><span style="font-size:12px;color:var(--text-3)">${_esc(p.brand)} · ${_esc(p.scale)} · RM ${p.price.toFixed(2)} · ${p.stock} in stock</span>`;
+  _resvEditId = null; _resvCart = [_resvSnap(p, 1)];
+  document.getElementById('resv-title').textContent = 'Reserve for customer';
   ['resv-name', 'resv-phone', 'resv-deposit', 'resv-notes'].forEach(id => _poSet(id, ''));
-  _poSet('resv-qty', '1');
-  document.getElementById('resv-msg').innerHTML = '';
-  poOpen('resv-modal');
-  setTimeout(() => { const i = document.getElementById('resv-name'); if (i) i.focus(); }, 100);
+  _openResvModal();
+}
+function resvEdit(id) {
+  const r = reservations.find(x => x.id === id); if (!r) return;
+  poClose('resv-list-modal');   // the list would otherwise cover the edit modal
+  _resvEditId = id; _resvCart = resvItems(r).map(i => ({ ...i }));
+  document.getElementById('resv-title').textContent = 'Edit reservation #' + (r.no || '');
+  _poSet('resv-name', r.customer); _poSet('resv-phone', r.phone || '');
+  _poSet('resv-deposit', r.deposit || 0); _poSet('resv-notes', r.notes || '');
+  _openResvModal();
+}
+function renderResvCart() {
+  const el = document.getElementById('resv-items'); if (!el) return;
+  el.innerHTML = _resvCart.map(i => `
+    <div class="resv-line">
+      <div style="flex:1;min-width:0"><div class="suggest-name">${_esc(i.prodName)}</div><div class="suggest-sub">${_esc(i.brand)} · RM ${i.price.toFixed(2)} · ${_resvAvail(i.barcode)} available</div></div>
+      <div class="stepper">
+        <button class="stepper-btn" onclick="resvCartQty('${i.barcode}',-1)">−</button>
+        <span class="stepper-qty">${i.qty}</span>
+        <button class="stepper-btn" onclick="resvCartQty('${i.barcode}',1)">+</button>
+      </div>
+      <div class="resv-line-total">RM ${(i.price * i.qty).toFixed(2)}</div>
+      <button class="remove-btn" onclick="resvCartRemove('${i.barcode}')">✕</button>
+    </div>`).join('') || '<div class="po-empty" style="padding:12px">No cars yet — search below to add one</div>';
+  resvUpdateBalance();
+}
+function resvUpdateBalance() {
+  const el = document.getElementById('resv-balance'); if (!el) return;
+  const total = _resvCart.reduce((a, i) => a + i.price * i.qty, 0);
+  const dep = parseFloat(_poVal('resv-deposit')) || 0;
+  el.textContent = _resvCart.length
+    ? `Items total RM ${total.toFixed(2)} · Balance after deposit RM ${Math.max(0, total - dep).toFixed(2)}` : '';
+}
+function resvCartQty(bc, d) {
+  const i = _resvCart.find(x => x.barcode === bc); if (!i) return;
+  const max = Math.max(1, _resvAvail(bc));
+  i.qty = Math.min(max, Math.max(1, i.qty + d));
+  renderResvCart();
+}
+function resvCartRemove(bc) { _resvCart = _resvCart.filter(x => x.barcode !== bc); renderResvCart(); }
+function resvAddSuggest() {
+  const el = document.getElementById('resv-suggest'); if (!el) return;
+  const q = _poVal('resv-add').trim().toLowerCase();
+  if (q.length < 2) { el.classList.remove('show'); el.innerHTML = ''; return; }
+  const m = products.filter(p => ((p.stock || 0) > 0 || _resvOldQty(p.barcode) > 0) &&
+    (p.barcode.toLowerCase() === q || p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q))).slice(0, 5);
+  if (!m.length) { el.classList.remove('show'); el.innerHTML = ''; return; }
+  el.innerHTML = m.map(p => `
+    <div class="suggest-row" onclick="resvAddPick('${p.barcode}')">
+      ${p.img ? `<img class="ls-img" src="${p.img}" alt="">` : '<div class="ls-ph">🚗</div>'}
+      <div style="flex:1;min-width:0"><div class="suggest-name">${_esc(p.name)}</div><div class="suggest-sub">${_esc(p.brand)} · RM ${p.price.toFixed(2)}</div></div>
+      <span class="suggest-stock">${_resvAvail(p.barcode)} available</span>
+    </div>`).join('');
+  el.classList.add('show');
+}
+function resvAddPick(bc) {
+  const p = products.find(x => x.barcode === bc); if (!p) return;
+  const ex = _resvCart.find(i => i.barcode === bc);
+  if (ex) { if (ex.qty < _resvAvail(bc)) ex.qty++; }
+  else _resvCart.push(_resvSnap(p, 1));
+  _poSet('resv-add', '');
+  const s = document.getElementById('resv-suggest'); if (s) { s.classList.remove('show'); s.innerHTML = ''; }
+  renderResvCart();
+}
+function resvAddSubmit() {
+  const q = _poVal('resv-add').trim(); if (!q) return;
+  const exact = products.find(p => p.barcode === q);
+  if (exact) { resvAddPick(exact.barcode); return; }
+  const rows = document.querySelectorAll('#resv-suggest .suggest-row');
+  if (rows.length === 1) rows[0].click();
+}
+// stock delta between the reservation's previous items and the new cart —
+// returns increases, deducts additions, in one pass
+function _resvApplyStockDelta(oldItems, newItems) {
+  const m = {};
+  oldItems.forEach(i => m[i.barcode] = (m[i.barcode] || 0) + i.qty);
+  newItems.forEach(i => m[i.barcode] = (m[i.barcode] || 0) - i.qty);
+  Object.entries(m).forEach(([bc, delta]) => {
+    if (!delta) return;
+    const p = products.find(x => x.barcode === bc); if (!p) return;
+    p.stock = Math.max(0, (p.stock || 0) + delta);
+    save('STOCK_ADJUST', { barcode: bc, stock: p.stock });
+  });
 }
 function saveReservation() {
-  const p = products.find(x => x.barcode === _resvBarcode); if (!p) return;
   const name = _poVal('resv-name').trim();
   if (!name) { showMsg('resv-msg', 'Customer name is required', 'err'); return; }
-  const qty = Math.max(1, parseInt(_poVal('resv-qty')) || 1);
-  if (qty > (p.stock || 0)) { showMsg('resv-msg', `Only ${p.stock} in stock`, 'err'); return; }
-  const r = { id: 'rsv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-    no: 'R' + Date.now().toString(36).slice(-5).toUpperCase(),
-    barcode: p.barcode, prodName: p.name, brand: p.brand, scale: p.scale, price: p.price,
-    qty, customer: name, phone: _poVal('resv-phone').trim(),
+  if (!_resvCart.length) { showMsg('resv-msg', 'Add at least one car', 'err'); return; }
+  for (const i of _resvCart) {
+    const avail = _resvAvail(i.barcode);
+    if (i.qty > avail) { showMsg('resv-msg', `Only ${avail} available for ${i.prodName}`, 'err'); return; }
+  }
+  const old = _resvEditId ? reservations.find(x => x.id === _resvEditId) : null;
+  _resvApplyStockDelta(old ? resvItems(old) : [], _resvCart);
+  const r = {
+    id: old ? old.id : 'rsv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    no: old ? old.no : 'R' + Date.now().toString(36).slice(-5).toUpperCase(),
+    customer: name, phone: _poVal('resv-phone').trim(),
     deposit: parseFloat(_poVal('resv-deposit')) || 0, notes: _poVal('resv-notes').trim(),
-    img: p.img || null, createdAt: new Date().toLocaleString('en-MY'), timestamp: Date.now() };
-  p.stock = Math.max(0, p.stock - qty);
-  save('STOCK_ADJUST', { barcode: p.barcode, stock: p.stock });
-  reservations.unshift(r); save('RESV_UPSERT', r);
+    items: _resvCart.map(i => ({ ...i })),
+    createdAt: old ? old.createdAt : new Date().toLocaleString('en-MY'),
+    timestamp: old ? old.timestamp : Date.now()
+  };
+  if (old) { const ix = reservations.findIndex(x => x.id === old.id); if (ix >= 0) reservations[ix] = r; }
+  else reservations.unshift(r);
+  save('RESV_UPSERT', r);
+  const wasEdit = !!old;
+  _resvEditId = null; _resvCart = [];
   poClose('resv-modal');
-  renderInventory(); renderStats();
-  poToast(`Reserved ${qty}× ${p.name} for ${name}`);
+  renderInventory(); renderStats(); renderReservations();
+  if (wasEdit) openReservations();   // came from the list — take the user back
+  const units = r.items.reduce((a, i) => a + i.qty, 0);
+  poToast(`${wasEdit ? 'Updated' : 'Reserved'} — ${r.items.length} car(s), ${units} unit(s) for ${name}`);
 }
 function openReservations() { renderReservations(); poOpen('resv-list-modal'); }
 function renderReservations() {
@@ -1024,15 +1155,19 @@ function renderReservations() {
     return;
   }
   el.innerHTML = reservations.map(r => {
-    const total = r.price * r.qty, bal = Math.max(0, total - (r.deposit || 0));
+    const items = resvItems(r);
+    const total = resvTotal(r), bal = Math.max(0, total - (r.deposit || 0));
+    const first = items[0] || {};
+    const carsLine = items.map(i => `${_esc(i.prodName)} ×${i.qty}`).join(', ');
     return `<div class="resv-row">
-      ${r.img ? `<img class="sold-thumb" src="${r.img}" alt="">` : '<div class="sold-ph">🚗</div>'}
+      ${first.img ? `<img class="sold-thumb" src="${first.img}" alt="">` : '<div class="sold-ph">🚗</div>'}
       <div class="resv-info">
-        <div class="resv-name">${_esc(r.prodName)} ×${r.qty} <span class="resv-no">#${r.no || ''}</span></div>
-        <div class="resv-sub">👤 ${_esc(r.customer)}${r.phone ? ' · 📞 ' + _esc(r.phone) : ''} · ${_esc((r.createdAt || '').split(',')[0])}</div>
-        <div class="resv-sub">Deposit <b>RM ${(r.deposit || 0).toFixed(2)}</b> · Balance <b class="resv-due">RM ${bal.toFixed(2)}</b>${r.notes ? ' · 📝 ' + _esc(r.notes) : ''}</div>
+        <div class="resv-name">👤 ${_esc(r.customer)} <span class="resv-no">#${r.no || ''}</span>${r.phone ? ` <span class="resv-no">· 📞 ${_esc(r.phone)}</span>` : ''}</div>
+        <div class="resv-sub resv-cars">🚗 ${carsLine}</div>
+        <div class="resv-sub">Total <b>RM ${total.toFixed(2)}</b> · Deposit <b>RM ${(r.deposit || 0).toFixed(2)}</b> · Balance <b class="resv-due">RM ${bal.toFixed(2)}</b> · ${_esc((r.createdAt || '').split(',')[0])}${r.notes ? ' · 📝 ' + _esc(r.notes) : ''}</div>
       </div>
       <div class="resv-actions">
+        <button class="btn btn-outline btn-sm" onclick="resvEdit('${r.id}')" title="Edit / add cars">✎</button>
         <button class="btn btn-ghost btn-sm" onclick="openResvReceipt('${r.id}')">📋 Receipt</button>
         <button class="btn btn-primary btn-sm" onclick="resvMarkSold('${r.id}')">✓ Sold</button>
         <button class="btn btn-danger btn-sm" onclick="resvCancel('${r.id}')" title="Cancel & return to stock">✕</button>
@@ -1042,14 +1177,16 @@ function renderReservations() {
 }
 function resvMarkSold(id) {
   const r = reservations.find(x => x.id === id); if (!r) return;
-  const total = r.price * r.qty;
-  poConfirm(`Complete the deal — mark <b>${_esc(r.prodName)} ×${r.qty}</b> as sold to <b>${_esc(r.customer)}</b> for <b>RM ${total.toFixed(2)}</b>?`, () => {
+  const items = resvItems(r);
+  const total = resvTotal(r);
+  const units = items.reduce((a, i) => a + i.qty, 0);
+  poConfirm(`Complete the deal — mark <b>${items.length} car(s) (${units} unit${units !== 1 ? 's' : ''})</b> as sold to <b>${_esc(r.customer)}</b> for <b>RM ${total.toFixed(2)}</b>?`, () => {
     const rNo = nextReceiptNo(); const now = Date.now();
     const salesType = poDefaultSaleType(); const ev = getActiveEvent();
     const rec = { id: 's_' + now, receiptNo: rNo, receiptNumber: rNo,
       date: new Date().toLocaleString('en-MY'), timestamp: now,
-      items: r.prodName + ' ×' + r.qty,
-      arr: [{ barcode: r.barcode, name: r.prodName, brand: r.brand, scale: r.scale, price: r.price, discPrice: undefined, qty: r.qty, img: r.img || null }],
+      items: items.map(i => i.prodName + ' ×' + i.qty).join(', '),
+      arr: items.map(i => ({ barcode: i.barcode, name: i.prodName, brand: i.brand, scale: i.scale, price: i.price, discPrice: undefined, qty: i.qty, img: i.img || null })),
       subtotal: total.toFixed(2), discount: '0.00', discType: 'rm', total: total.toFixed(2),
       paymentMethod: 'Cash', customer: r.customer,
       salesType, event: salesType === 'Physical' ? (ev ? ev.name : 'No event') : ONLINE_EVENT,
@@ -1060,10 +1197,12 @@ function resvMarkSold(id) {
       fromReservation: r.no || r.id };
     sales.unshift(rec); save('SALE', rec);
     // Stock was already deducted when the reservation was made. Remote devices
-    // deduct again on the SALE event, so follow with an absolute STOCK_ADJUST
+    // deduct again on the SALE event, so follow with absolute STOCK_ADJUSTs
     // (ordered after the sale) to correct them; local stock is untouched.
-    const p = products.find(x => x.barcode === r.barcode);
-    if (p) save('STOCK_ADJUST', { barcode: p.barcode, stock: p.stock });
+    items.forEach(i => {
+      const p = products.find(x => x.barcode === i.barcode);
+      if (p) save('STOCK_ADJUST', { barcode: p.barcode, stock: p.stock });
+    });
     save('RESV_UPSERT', { id, _deleted: true });
     renderReservations(); renderInventory(); renderStats();
     showReceipt(rec);
@@ -1071,10 +1210,14 @@ function resvMarkSold(id) {
 }
 function resvCancel(id) {
   const r = reservations.find(x => x.id === id); if (!r) return;
-  poConfirm(`Cancel this reservation for <b>${_esc(r.customer)}</b> and return ${r.qty} unit(s) to stock?` +
+  const items = resvItems(r);
+  const units = items.reduce((a, i) => a + i.qty, 0);
+  poConfirm(`Cancel this reservation for <b>${_esc(r.customer)}</b> and return ${units} unit(s) to stock?` +
     ((r.deposit || 0) > 0 ? `<br><span style="font-size:12px;color:var(--text-3)">Deposit RM ${r.deposit.toFixed(2)} was collected — handle any refund yourself.</span>` : ''), () => {
-    const p = products.find(x => x.barcode === r.barcode);
-    if (p) { p.stock = (p.stock || 0) + r.qty; save('STOCK_ADJUST', { barcode: p.barcode, stock: p.stock }); }
+    items.forEach(i => {
+      const p = products.find(x => x.barcode === i.barcode);
+      if (p) { p.stock = (p.stock || 0) + i.qty; save('STOCK_ADJUST', { barcode: p.barcode, stock: p.stock }); }
+    });
     save('RESV_UPSERT', { id, _deleted: true });
     renderReservations(); renderInventory(); renderStats();
     poToast('Reservation cancelled — stock returned');
@@ -1083,7 +1226,8 @@ function resvCancel(id) {
 // reservation slip (same copy-text house style as receipts/invoices)
 function resvReceiptText(r) {
   const R = '—'.repeat(17), L = [];
-  const total = r.price * r.qty, bal = Math.max(0, total - (r.deposit || 0));
+  const items = resvItems(r);
+  const total = resvTotal(r), bal = Math.max(0, total - (r.deposit || 0));
   L.push('🔖 MobiHobby');
   L.push('Reservation Slip');
   L.push(R);
@@ -1092,15 +1236,19 @@ function resvReceiptText(r) {
   L.push('Customer: ' + r.customer);
   if (r.phone) L.push('Phone: ' + r.phone);
   L.push(R);
-  L.push('1. ' + r.prodName);
-  L.push('   ' + r.brand + ' · ' + r.scale);
-  L.push(`   ${r.qty} × ${_money(r.price)} = ${_money(total)}`);
+  items.forEach((i, k) => {
+    L.push(`${k + 1}. ${i.prodName}`);
+    L.push(`   ${i.brand} · ${i.scale}`);
+    L.push(`   ${i.qty} × ${_money(i.price)} = ${_money(i.price * i.qty)}`);
+    if (k < items.length - 1) L.push('');
+  });
   L.push(R);
+  L.push('Items total   ' + _money(total));
   L.push('Deposit paid  ' + _money(r.deposit || 0));
   L.push('BALANCE DUE   ' + _money(bal));
   L.push(R);
   if (r.notes) { L.push('📝 ' + r.notes); L.push(R); }
-  L.push('🚗 This unit is reserved & held');
+  L.push('🚗 These units are reserved & held');
   L.push('just for you. Kindly settle the');
   L.push('balance to complete the deal.');
   L.push('Thank you for choosing MobiHobby! 🙏');

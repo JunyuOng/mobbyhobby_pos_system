@@ -271,6 +271,13 @@ tr.inv-oos:hover td{opacity:.85}
 .resv-sub b{color:var(--text)}
 .resv-sub b.resv-due{color:var(--danger)}
 .resv-actions{display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+.resv-cars{white-space:normal;word-break:break-word}
+/* cart lines inside the reserve modal */
+.resv-line{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px;background:var(--surface)}
+.resv-line-total{font-size:12px;font-weight:700;color:var(--blue);white-space:nowrap;min-width:64px;text-align:right}
+#resv-add{border-style:dashed}
+#resv-items{margin-bottom:8px}
+#resv-balance{font-size:12px;color:var(--text-2);font-weight:600;margin-top:8px;min-height:16px}
 .thumb{width:32px;height:32px;border-radius:6px;object-fit:cover;display:block}
 .thumb-ph{width:32px;height:32px;border-radius:6px;background:var(--blue-ice);display:flex;align-items:center;justify-content:center;font-size:13px}
 .action-cell{display:flex;gap:4px}

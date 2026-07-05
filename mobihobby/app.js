@@ -1613,6 +1613,48 @@ function parseScale(raw) {
 function openImportModal() { cancelImport(); poOpen('import-modal'); }
 function closeImportModal() { cancelImport(); poClose('import-modal'); }
 
+// ── FULL BACKUP / RESTORE ──
+// Everything the app stores, in one JSON file: products & stock, the whole
+// sales log, events, pre-orders, reservations, receipt counter. Restore
+// replaces this browser's data and reloads (it does NOT broadcast to other
+// devices — they keep their own state / the Firebase event log).
+function openBackup() { const m = document.getElementById('backup-msg'); if (m) m.innerHTML = ''; poOpen('backup-modal'); }
+function downloadFullBackup() {
+  const payload = {
+    app: 'mobihobby-pos', version: 1, exportedAt: new Date().toISOString(),
+    data: { products, sales, events, activeEventId, receiptCounter, customers, poBatches, poItems, reservations }
+  };
+  _poDownload('mobihobby_backup_' + new Date().toISOString().slice(0, 10) + '.json',
+    JSON.stringify(payload, null, 2), 'application/json');
+  poToast('Backup downloaded — keep a copy somewhere safe');
+}
+function handleRestoreFile(input) {
+  const f = input.files[0]; input.value = ''; if (!f) return;
+  const r = new FileReader();
+  r.onload = e => {
+    let d;
+    try { d = JSON.parse(e.target.result); } catch (err) { showMsg('backup-msg', 'Not a valid backup file', 'err'); return; }
+    const data = d && d.app === 'mobihobby-pos' && d.data ? d.data : null;
+    if (!data || !Array.isArray(data.products) || !Array.isArray(data.sales)) {
+      showMsg('backup-msg', 'Not a MobiHobby backup file', 'err'); return;
+    }
+    poConfirm(
+      `Restore backup from <b>${_esc((d.exportedAt || '').slice(0, 10) || 'unknown date')}</b>?<br>` +
+      `${data.products.length} products · ${data.sales.length} sales · ${(data.poItems || []).length} preorders · ${(data.reservations || []).length} reservations<br>` +
+      `<span style="font-size:12px;color:var(--danger)">This replaces ALL data currently in this browser.</span>`, () => {
+      products = data.products || []; sales = data.sales || []; events = data.events || [];
+      activeEventId = data.activeEventId || '';
+      receiptCounter = parseInt(data.receiptCounter) || 0;
+      customers = data.customers || []; poBatches = data.poBatches || []; poItems = data.poItems || [];
+      reservations = data.reservations || [];
+      localStorage.setItem('mhf_aev', activeEventId);
+      _localSave();
+      location.reload();   // clean re-init of every view + the sync engine
+    });
+  };
+  r.readAsText(f);
+}
+
 let pendingImportData = [];
 function handleCSVImport(input) {
   const file=input.files[0]; if(!file)return;

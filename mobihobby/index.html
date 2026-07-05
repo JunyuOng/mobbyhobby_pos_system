@@ -186,6 +186,7 @@
             <button class="btn btn-outline btn-sm" id="resv-btn" onclick="openReservations()">🔖 Reservations</button>
             <button class="btn btn-outline btn-sm" onclick="openImportModal()">⬆ Import CSV</button>
             <button class="btn btn-outline btn-sm" onclick="exportCSV()">⬇ Export Inventory</button>
+            <button class="btn btn-outline btn-sm" onclick="openBackup()">💾 Backup</button>
           </div>
           <div class="inv-filters">
             <div class="inv-search-wrap"><input id="inv-q" placeholder="Search name, brand, barcode…" oninput="applyFilters()"></div>
@@ -463,6 +464,22 @@
   <div class="card-title" style="margin-top:18px">Your events</div>
   <div id="event-list"><div class="empty-state"><span class="empty-icon">📅</span><div class="empty-title">No events yet</div></div></div>
   <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('events-modal')" style="flex:1">Close</button></div>
+</div></div>
+
+<!-- ══ FULL BACKUP / RESTORE MODAL (opened from Inventory) ══ -->
+<div class="po-ovl" id="backup-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Backup &amp; Restore</h3>
+  <div class="po-modal-sub">One file with <b>everything</b>: products &amp; stock, the full sales log, events, pre-orders, reservations and the receipt counter. Keep a copy somewhere safe (send it to yourself on WhatsApp or Google Drive).</div>
+  <button class="btn btn-primary" onclick="downloadFullBackup()" style="width:100%">💾 Download full backup</button>
+  <div class="po-note" style="margin:14px 0 10px">Restoring <b>replaces all data in this browser</b> with the backup's contents, then reloads the app. Use it when moving to a new web address or a new device.</div>
+  <div class="import-drop">
+    <span class="import-drop-icon">📂</span>
+    <div style="font-weight:600;color:var(--text);margin-bottom:4px">Restore — drop a backup file here or tap to browse</div>
+    <div style="font-size:12px;color:var(--text-3)">.json backup files only</div>
+    <input type="file" accept=".json,application/json" onchange="handleRestoreFile(this)">
+  </div>
+  <div id="backup-msg"></div>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('backup-modal')" style="flex:1">Close</button></div>
 </div></div>
 
 <!-- ══ CSV IMPORT MODAL (opened from Inventory) ══ -->

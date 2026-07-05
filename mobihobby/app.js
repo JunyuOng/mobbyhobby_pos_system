@@ -1008,7 +1008,7 @@ function updateResvBadge() {
 }
 
 // ── create / edit modal (cart of cars) ──
-let _resvCart = [], _resvEditId = null;
+let _resvCart = [], _resvEditId = null, _resvReturnToList = false;
 function _resvSnap(p, qty) { return { barcode: p.barcode, prodName: p.name, brand: p.brand, scale: p.scale, price: p.price, qty: qty || 1, img: p.img || null }; }
 // units of this barcode already held by the reservation being edited — they're
 // free to re-use since they'd be returned on save
@@ -1021,7 +1021,7 @@ function _resvAvail(bc) { const p = products.find(x => x.barcode === bc); return
 function _openResvModal() {
   document.getElementById('resv-msg').innerHTML = '';
   _poSet('resv-add', '');
-  const s = document.getElementById('resv-suggest'); if (s) { s.classList.remove('show'); s.innerHTML = ''; }
+  ['resv-suggest', 'resv-name-suggest'].forEach(id => { const s = document.getElementById(id); if (s) { s.classList.remove('show'); s.innerHTML = ''; } });
   renderResvCart();
   poOpen('resv-modal');
   setTimeout(() => { const i = document.getElementById('resv-name'); if (i && !i.value) i.focus(); }, 100);
@@ -1029,7 +1029,7 @@ function _openResvModal() {
 function openReserve(bc) {
   const p = products.find(x => x.barcode === bc); if (!p) return;
   if ((p.stock || 0) <= 0) { poToast('No stock available to reserve'); return; }
-  _resvEditId = null; _resvCart = [_resvSnap(p, 1)];
+  _resvEditId = null; _resvReturnToList = false; _resvCart = [_resvSnap(p, 1)];
   document.getElementById('resv-title').textContent = 'Reserve for customer';
   ['resv-name', 'resv-phone', 'resv-deposit', 'resv-notes'].forEach(id => _poSet(id, ''));
   _openResvModal();
@@ -1037,11 +1037,51 @@ function openReserve(bc) {
 function resvEdit(id) {
   const r = reservations.find(x => x.id === id); if (!r) return;
   poClose('resv-list-modal');   // the list would otherwise cover the edit modal
-  _resvEditId = id; _resvCart = resvItems(r).map(i => ({ ...i }));
+  _resvEditId = id; _resvReturnToList = true; _resvCart = resvItems(r).map(i => ({ ...i }));
   document.getElementById('resv-title').textContent = 'Edit reservation #' + (r.no || '');
   _poSet('resv-name', r.customer); _poSet('resv-phone', r.phone || '');
   _poSet('resv-deposit', r.deposit || 0); _poSet('resv-notes', r.notes || '');
   _openResvModal();
+}
+// Typing a name while creating suggests customers who already hold a
+// reservation — picking one merges the new car(s) into their existing stash
+// instead of opening a second reservation for the same person.
+function resvNameSuggest() {
+  const el = document.getElementById('resv-name-suggest'); if (!el) return;
+  if (_resvEditId) { el.classList.remove('show'); el.innerHTML = ''; return; }   // already attached
+  const q = _poVal('resv-name').trim().toLowerCase();
+  const qd = q.replace(/\D/g, '');
+  if (q.length < 2) { el.classList.remove('show'); el.innerHTML = ''; return; }
+  const m = reservations.filter(r => r.customer.toLowerCase().includes(q) ||
+    (qd.length >= 3 && _normPhone(r.phone).includes(qd))).slice(0, 4);
+  if (!m.length) { el.classList.remove('show'); el.innerHTML = ''; return; }
+  el.innerHTML = m.map(r => {
+    const items = resvItems(r);
+    return `<div class="suggest-row" onclick="resvAttach('${r.id}')">
+      <div class="po-av">${_poInitials(r.customer)}</div>
+      <div style="flex:1;min-width:0"><div class="suggest-name">${_esc(r.customer)}</div>
+        <div class="suggest-sub">#${r.no || ''} · ${items.length} car(s) · Total RM ${resvTotal(r).toFixed(2)}</div></div>
+      <span class="suggest-stock">＋ Add to stash</span>
+    </div>`;
+  }).join('');
+  el.classList.add('show');
+}
+function resvAttach(id) {
+  const r = reservations.find(x => x.id === id); if (!r) return;
+  // merge the freshly-picked car(s) into their existing items
+  const merged = resvItems(r).map(i => ({ ...i }));
+  _resvCart.forEach(n => {
+    const ex = merged.find(i => i.barcode === n.barcode);
+    if (ex) ex.qty += n.qty; else merged.push({ ...n });
+  });
+  _resvEditId = id;   // becomes an edit — stock deltas only touch the additions
+  _resvCart = merged;
+  _resvCart.forEach(i => { i.qty = Math.min(i.qty, Math.max(1, _resvAvail(i.barcode))); });
+  _poSet('resv-name', r.customer); _poSet('resv-phone', r.phone || '');
+  _poSet('resv-deposit', r.deposit || 0); _poSet('resv-notes', r.notes || '');
+  document.getElementById('resv-title').textContent = `Add to ${r.customer}'s reservation #${r.no || ''}`;
+  const el = document.getElementById('resv-name-suggest'); if (el) { el.classList.remove('show'); el.innerHTML = ''; }
+  renderResvCart();
 }
 function renderResvCart() {
   const el = document.getElementById('resv-items'); if (!el) return;
@@ -1142,7 +1182,7 @@ function saveReservation() {
   _resvEditId = null; _resvCart = [];
   poClose('resv-modal');
   renderInventory(); renderStats(); renderReservations();
-  if (wasEdit) openReservations();   // came from the list — take the user back
+  if (_resvReturnToList) { openReservations(); _resvReturnToList = false; }   // came from the list — take the user back
   const units = r.items.reduce((a, i) => a + i.qty, 0);
   poToast(`${wasEdit ? 'Updated' : 'Reserved'} — ${r.items.length} car(s), ${units} unit(s) for ${name}`);
 }

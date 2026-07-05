@@ -15,11 +15,12 @@
   <div class="lock-device" id="lock-device-id"></div>
   <div class="lock-sell-area">
     <div class="lock-event" id="lock-event-name">No event selected</div>
-    <div class="lock-scan-label">Scan item barcode</div>
+    <div class="lock-scan-label">Scan barcode or search by name</div>
     <div class="lock-scan-wrap">
-      <input class="lock-scan-input" id="lock-scan-input" placeholder="Scan or type barcode…" autocomplete="off" inputmode="numeric" onkeydown="if(event.key==='Enter')lockScan()">
+      <input class="lock-scan-input" id="lock-scan-input" placeholder="Scan barcode or type item name…" autocomplete="off" onkeydown="if(event.key==='Enter')lockScan()" oninput="sellSuggestInput(true)">
       <button class="lock-scan-btn" onclick="lockScan()">+</button>
     </div>
+    <div class="scan-suggest" id="lock-suggest"></div>
     <div class="lock-last-scan" id="lock-last-scan">
       <div id="lock-ls-img"></div>
       <div style="flex:1;min-width:0"><div class="lock-ls-name" id="lock-ls-name"></div><div class="lock-ls-sub" id="lock-ls-sub"></div></div>
@@ -86,15 +87,11 @@
       <div class="tagline">Diecast &amp; hobby collectibles</div>
     </div>
     <nav class="sidebar-nav">
-      <div class="nav-item" onclick="goTab('sell')"        id="snav-sell">       <span class="nav-icon">⊡</span> Sell</div>
-      <div class="nav-item active" onclick="goTab('inventory')" id="snav-inventory"> <span class="nav-icon">◫</span> Inventory</div>
-      <div class="nav-item" onclick="goTab('addedit')"     id="snav-addedit">    <span class="nav-icon">⊕</span> Add / Edit</div>
-      <div class="nav-item" onclick="goTab('events')"      id="snav-events">     <span class="nav-icon">📅</span> Events</div>
-      <div class="nav-item" onclick="goTab('preorders')"   id="snav-preorders"> <span class="nav-icon">📦</span> Pre-orders</div>
-      <div class="nav-item" onclick="goTab('sold')"        id="snav-sold">       <span class="nav-icon">📋</span> Sold Items</div>
-      <div class="nav-item" onclick="goTab('labels')"      id="snav-labels">     <span class="nav-icon">◈</span> Labels</div>
-      <div class="nav-item" onclick="goTab('importexport')" id="snav-importexport"><span class="nav-icon">⇅</span> Import / Export</div>
-      <div class="nav-item" onclick="goTab('history')"     id="snav-history">    <span class="nav-icon">⊟</span> History</div>
+      <div class="nav-item" onclick="goTab('sell')"        id="snav-sell">Sell</div>
+      <div class="nav-item active" onclick="goTab('inventory')" id="snav-inventory">Inventory</div>
+      <div class="nav-item" onclick="goTab('preorders')"   id="snav-preorders">Pre-orders</div>
+      <div class="nav-item" onclick="goTab('sales')"       id="snav-sales">Sales</div>
+      <div class="nav-item" onclick="goTab('labels')"      id="snav-labels">Labels</div>
     </nav>
     <div class="sidebar-footer">
       <button class="btn btn-warning btn-sm" onclick="enterCashierMode()" style="width:100%">🔒 Cashier mode</button>
@@ -103,11 +100,10 @@
 
   <div class="main">
     <div class="topbar">
-      <img class="mh-logo-mark topbar-logo" data-mh-logo alt="MobiHobby">
       <span class="topbar-title" id="topbar-title">Inventory</span>
       <div class="topbar-right">
         <span id="sync-badge">⚡ Offline</span>
-        <div class="topbar-event" id="topbar-event" onclick="goTab('events')">📅 No event</div>
+        <div class="topbar-event" id="topbar-event" onclick="openEventsModal()">📅 No event</div>
         <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()">🌙</button>
         <button class="lock-btn" onclick="enterCashierMode()">🔒 Lock</button>
       </div>
@@ -119,15 +115,16 @@
       <div class="panel" id="panel-sell">
         <div class="sell-event-bar">
           <span class="sell-event-name" id="sell-event-name">No event selected</span>
-          <button class="btn btn-ghost btn-sm" onclick="goTab('events')">Change</button>
+          <button class="btn btn-ghost btn-sm" onclick="openEventsModal()">📅 Manage events</button>
         </div>
         <div class="scan-hero">
-          <div class="scan-hero-label">Scan item barcode</div>
+          <div class="scan-hero-label">Scan barcode or search by name</div>
           <div class="scan-wrap">
-            <input class="scan-input" id="sell-input" placeholder="Scan or type barcode…" autocomplete="off" inputmode="numeric" onkeydown="if(event.key==='Enter')scanSell()">
+            <input class="scan-input" id="sell-input" placeholder="Scan barcode or type item name…" autocomplete="off" onkeydown="if(event.key==='Enter')scanSell()" oninput="sellSuggestInput(false)">
             <button class="scan-btn" onclick="scanSell()">+</button>
           </div>
         </div>
+        <div class="scan-suggest" id="sell-suggest"></div>
         <div class="last-scan" id="last-scan">
           <div id="ls-img-wrap"></div>
           <div style="flex:1;min-width:0"><div class="ls-name" id="ls-name"></div><div class="ls-sub" id="ls-sub"></div></div>
@@ -184,6 +181,13 @@
       <div class="panel active" id="panel-inventory">
         <div class="stat-grid" id="stats"></div>
         <div class="card">
+          <div class="inv-toolbar">
+            <button class="btn btn-primary btn-sm" onclick="openAddProduct()">＋ Add Item</button>
+            <button class="btn btn-outline btn-sm" id="resv-btn" onclick="openReservations()">🔖 Reservations</button>
+            <button class="btn btn-outline btn-sm" onclick="openImportModal()">⬆ Import CSV</button>
+            <button class="btn btn-outline btn-sm" onclick="exportCSV()">⬇ Export Inventory</button>
+            <button class="btn btn-outline btn-sm" onclick="openBackup()">💾 Backup</button>
+          </div>
           <div class="inv-filters">
             <div class="inv-search-wrap"><input id="inv-q" placeholder="Search name, brand, barcode…" oninput="applyFilters()"></div>
             <select id="f-brand-filter" onchange="applyFilters()">
@@ -231,85 +235,38 @@
         </div>
       </div>
 
-      <!-- ADD/EDIT -->
-      <div class="panel" id="panel-addedit">
-        <div class="card">
-          <div class="card-title">Look up existing product</div>
-          <div style="display:flex;gap:10px">
-            <div class="field" style="flex:1;margin:0"><input id="bc-input" placeholder="Scan or type barcode…" onkeydown="if(event.key==='Enter')lookupBarcode()" inputmode="numeric"></div>
-            <button class="btn btn-ghost" onclick="lookupBarcode()">Search</button>
-          </div>
-          <div id="bc-msg"></div>
+      <!-- SALES (Transactions ⇆ Items sold) -->
+      <div class="panel" id="panel-sales">
+        <div id="sales-view-row" style="display:flex;gap:6px;margin-bottom:12px">
+          <button class="saletype-btn active" data-sview="transactions" onclick="setSalesView('transactions')" style="flex:1">🧾 Transactions</button>
+          <button class="saletype-btn" data-sview="items" onclick="setSalesView('items')" style="flex:1">📦 Items sold</button>
         </div>
-        <div class="card">
-          <div class="card-title" id="form-mode-label">New product</div>
-          <div class="field"><label>Barcode</label>
-            <div class="bc-field-wrap">
-              <input id="f-bc" placeholder="Auto-generated" inputmode="numeric">
-              <button class="bc-gen-btn" onclick="genBarcode()" type="button">⟳ Generate</button>
-            </div>
+        <div id="sales-transactions">
+          <div class="stat-grid" id="hist-stats"></div>
+          <div class="hist-mode-row" id="hist-mode-row" style="display:flex;gap:6px;margin-bottom:10px">
+            <button class="saletype-btn active" data-mode="online" onclick="setHistMode('online')">🌐 Online sales</button>
+            <button class="saletype-btn" data-mode="events" onclick="setHistMode('events')">📅 Event sales</button>
           </div>
-          <div class="field-row">
-            <div class="field"><label>Brand</label>
-              <select id="f-brand">
-                <option>Mini GT</option><option>Hot Wheels</option><option>Kaido House</option>
-                <option>PopRace</option><option>INNO64</option><option>Tarmac Works</option>
-                <option>LCD Models</option><option>PEAKO</option><option>Tomica Limited Vintage</option><option>Other</option>
-              </select>
-            </div>
-            <div class="field"><label>Scale</label>
-              <select id="f-scale"><option>1:64</option><option>1:43</option><option>1:18</option><option>1:24</option></select>
-            </div>
+          <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+            <select id="hist-event-filter" onchange="renderHistory();renderHistStats()" style="display:none;padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-pill);font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--surface);appearance:none;flex:1">
+              <option value="">All events</option>
+            </select>
+            <select id="hist-platform-filter" onchange="renderHistory();renderHistStats()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-pill);font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--surface);appearance:none;flex:1">
+              <option value="">All platforms</option>
+            </select>
+            <button class="btn btn-danger btn-sm" onclick="requirePin(()=>clearHistory())">🗑 Clear</button>
           </div>
-          <div class="field"><label>Product name</label><input id="f-name" placeholder="e.g. Nissan GT-R R34 – Bayside Blue #55"></div>
-          <div class="field-row">
-            <div class="field"><label>Selling price (RM)</label><input id="f-price" type="number" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
-            <div class="field"><label>Cost price (RM)</label><input id="f-cost" type="number" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
+          <div class="card">
+            <div id="hist-body"></div>
+            <div id="sales-empty" style="display:none"><div class="empty-state"><span class="empty-icon">🧾</span><div class="empty-title">No sales yet</div></div></div>
           </div>
-          <div class="field"><label>Stock qty</label><input id="f-stock" type="number" placeholder="1" min="0" inputmode="numeric"></div>
-          <div class="field"><label>Product photo</label>
-            <div class="img-upload" id="img-box">
-              <span class="upload-icon">📷</span>
-              <span style="font-size:13px">Tap to upload photo</span>
-              <div class="upload-overlay">Change photo</div>
-              <input type="file" accept="image/*" onchange="handleImg(this)">
-            </div>
-          </div>
-          <div class="btn-row">
-            <button class="btn btn-primary" onclick="saveProduct()">✓ Save</button>
-            <button class="btn btn-danger" id="delete-btn" style="display:none" onclick="requirePin(()=>deleteFromForm())">✕ Delete</button>
-            <button class="btn btn-outline" onclick="clearForm()">Clear</button>
-          </div>
-          <div id="save-msg"></div>
         </div>
-      </div>
-
-      <!-- EVENTS -->
-      <div class="panel" id="panel-events">
-        <div class="card">
-          <div class="card-title">Create new event</div>
-          <div class="field-row">
-            <div class="field"><label>Event name</label><input id="ev-name" placeholder="e.g. Hobbycon KL June 2026" onkeydown="if(event.key==='Enter')createNewEvent()"></div>
-            <div class="field"><label>Date</label><input id="ev-date" type="date"></div>
+        <div id="sales-items" style="display:none">
+          <div class="card">
+            <div class="card-title">Sold items — tap restore to add back to stock</div>
+            <div id="sold-list"></div>
+            <div id="sold-msg"></div>
           </div>
-          <div class="field"><label>Location (optional)</label><input id="ev-loc" placeholder="e.g. Pavilion KL"></div>
-          <div class="btn-row">
-            <button class="btn btn-primary" onclick="createNewEvent()">+ Create event</button>
-          </div>
-          <div id="ev-msg"></div>
-        </div>
-        <div class="card">
-          <div class="card-title">Your events</div>
-          <div id="event-list"><div class="empty-state"><span class="empty-icon">📅</span><div class="empty-title">No events yet</div></div></div>
-        </div>
-      </div>
-
-      <!-- SOLD ITEMS -->
-      <div class="panel" id="panel-sold">
-        <div class="card">
-          <div class="card-title">Sold items — tap restore to add back to cart</div>
-          <div id="sold-list"></div>
-          <div id="sold-msg"></div>
         </div>
       </div>
 
@@ -328,63 +285,9 @@
         </div>
         <div class="card" style="background:var(--blue-ice);border-color:var(--blue-border)">
           <div style="font-size:13px;color:var(--text-2);line-height:1.8">
-            <strong style="color:var(--blue)">Tip:</strong> Qty defaults to stock count. Labels auto-paginate across multiple A4 sheets if over 36.<br>
+            <strong style="color:var(--blue)">Tip:</strong> Qty defaults to stock count. Out-of-stock items are hidden. Labels auto-paginate across multiple A4 sheets if over 36.<br>
             Chrome: <strong>A4 · Portrait · No scaling (100%)</strong>.
           </div>
-        </div>
-      </div>
-
-      <!-- IMPORT/EXPORT -->
-      <div class="panel" id="panel-importexport">
-        <div class="card">
-          <div class="card-title">Export to CSV</div>
-          <p style="font-size:13px;color:var(--text-2);margin-bottom:14px">Downloads all products. Scale formatted as text (Excel-safe). Includes cost price column.</p>
-          <button class="btn btn-primary" onclick="exportCSV()">⬇ Download CSV</button>
-        </div>
-        <div class="card">
-          <div class="card-title">Import from CSV</div>
-          <p style="font-size:13px;color:var(--text-2);margin-bottom:12px">Columns: <strong>Name, Brand, Scale, Price, Stock</strong>. Barcode auto-generated if missing. Scale defaults to <strong>1:64</strong>.</p>
-          <div class="import-drop" id="import-drop">
-            <span class="import-drop-icon">📂</span>
-            <div style="font-weight:600;color:var(--text);margin-bottom:4px">Drop CSV here or tap to browse</div>
-            <div style="font-size:12px;color:var(--text-3)">.csv files only</div>
-            <input type="file" accept=".csv,text/csv" onchange="handleCSVImport(this)">
-          </div>
-          <div id="import-preview"></div>
-          <div id="import-msg"></div>
-          <div id="import-actions" style="display:none;margin-top:12px">
-            <div class="btn-row">
-              <button class="btn btn-primary" onclick="confirmImport()">✓ Import <span id="import-count"></span> products</button>
-              <button class="btn btn-outline" onclick="cancelImport()">Cancel</button>
-            </div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-title">Security — PIN</div>
-          <p style="font-size:13px;color:var(--text-2);margin-bottom:4px">Manager PIN protects: delete, bulk delete, clear history, delete event, cashier exit, and discounts over 20%.</p>
-          <p style="font-size:13px;color:var(--text-3)">PIN is managed centrally. Contact your administrator to change it.</p>
-        </div>
-      </div>
-
-      <!-- HISTORY -->
-      <div class="panel" id="panel-history">
-        <div class="stat-grid" id="hist-stats"></div>
-        <div class="hist-mode-row" id="hist-mode-row" style="display:flex;gap:6px;margin-bottom:10px">
-          <button class="saletype-btn active" data-mode="events" onclick="setHistMode('events')">📅 Event sales</button>
-          <button class="saletype-btn" data-mode="online" onclick="setHistMode('online')">🌐 Online sales</button>
-        </div>
-        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-          <select id="hist-event-filter" onchange="renderHistory();renderHistStats()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-pill);font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--surface);appearance:none;flex:1">
-            <option value="">All events</option>
-          </select>
-          <select id="hist-platform-filter" onchange="renderHistory();renderHistStats()" style="display:none;padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-pill);font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--surface);appearance:none;flex:1">
-            <option value="">All platforms</option>
-          </select>
-          <button class="btn btn-danger btn-sm" onclick="requirePin(()=>clearHistory())">🗑 Clear</button>
-        </div>
-        <div class="card">
-          <div id="hist-body"></div>
-          <div id="sales-empty" style="display:none"><div class="empty-state"><span class="empty-icon">🧾</span><div class="empty-title">No sales yet</div></div></div>
         </div>
       </div>
 
@@ -392,13 +295,14 @@
       <div class="panel" id="panel-preorders">
         <div class="po-toolbar">
           <button class="btn btn-primary btn-sm" onclick="openPoBatch()">＋ New Batch</button>
+          <button class="btn btn-outline btn-sm" onclick="openWatermark()">🖼 Watermark</button>
           <button class="btn btn-outline btn-sm" onclick="document.getElementById('po-import-file').click()">⬆ Import</button>
           <button class="btn btn-outline btn-sm" onclick="openExport()">⬇ Export</button>
           <button class="btn btn-outline btn-sm" onclick="archiveCompletedBatches()">🗄 Archive completed</button>
           <button class="btn btn-outline btn-sm" id="po-arch-toggle" onclick="togglePoArchived()">🗄 Archived</button>
           <input type="file" id="po-import-file" accept=".json,application/json" style="display:none" onchange="poImport(this)">
+          <span class="po-toolbar-sum" id="po-dash"></span>
         </div>
-        <div class="stat-grid" id="po-dash"></div>
         <div class="po-section-title" id="po-models-title">Models</div>
         <div class="po-models" id="po-models"></div>
         <div class="po-board">
@@ -413,14 +317,13 @@
 
     </div><!-- /content -->
 
-    <!-- Bottom nav mobile (5 tabs) -->
+    <!-- Bottom nav mobile (4 tabs) -->
     <div class="bottom-nav">
       <div class="bottom-tabs">
         <div class="tab-item" onclick="goTab('sell')"      id="bnav-sell">      <span class="tab-icon">⊡</span><span>Sell</span><span class="tab-pip"></span></div>
         <div class="tab-item active" onclick="goTab('inventory')" id="bnav-inventory"><span class="tab-icon">◫</span><span>Stock</span><span class="tab-pip"></span></div>
-        <div class="tab-item" onclick="goTab('addedit')"   id="bnav-addedit">   <span class="tab-icon">⊕</span><span>Add</span><span class="tab-pip"></span></div>
-        <div class="tab-item" onclick="goTab('sold')"      id="bnav-sold">      <span class="tab-icon">📋</span><span>Sold</span><span class="tab-pip"></span></div>
-        <div class="tab-item" onclick="goTab('history')"   id="bnav-history">   <span class="tab-icon">⊟</span><span>History</span><span class="tab-pip"></span></div>
+        <div class="tab-item" onclick="goTab('preorders')" id="bnav-preorders"> <span class="tab-icon">📦</span><span>Orders</span><span class="tab-pip"></span></div>
+        <div class="tab-item" onclick="goTab('sales')"     id="bnav-sales">     <span class="tab-icon">🧾</span><span>Sales</span><span class="tab-pip"></span></div>
       </div>
     </div>
   </div><!-- /main -->
@@ -492,6 +395,163 @@
     </div>
   </div>
 </div>
+
+<!-- ══ RESERVATION MODALS (opened from Inventory) ══ -->
+<div class="po-ovl" id="resv-modal"><div class="po-modal" style="width:min(520px,100%)">
+  <h3 class="po-modal-h" id="resv-title">Reserve for customer</h3>
+  <div class="field"><label>Cars in this reservation</label>
+    <div id="resv-items"></div>
+    <input id="resv-add" placeholder="＋ Add another car — type name or scan barcode…" autocomplete="off" oninput="resvAddSuggest()" onkeydown="if(event.key==='Enter')resvAddSubmit()">
+    <div class="scan-suggest" id="resv-suggest" style="margin-top:6px;margin-bottom:0"></div>
+    <div id="resv-balance"></div>
+  </div>
+  <div class="field-row">
+    <div class="field"><label>Customer name</label><input id="resv-name" placeholder="John Tan" autocomplete="off" oninput="resvNameSuggest()"></div>
+    <div class="field"><label>Phone</label><input id="resv-phone" inputmode="tel" placeholder="012-3456789"></div>
+  </div>
+  <div class="scan-suggest" id="resv-name-suggest" style="margin-bottom:10px"></div>
+  <div class="field-row">
+    <div class="field"><label>Deposit paid (RM)</label><input id="resv-deposit" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" oninput="resvUpdateBalance()"></div>
+    <div class="field"><label>Notes (optional)</label><input id="resv-notes" placeholder="optional"></div>
+  </div>
+  <div id="resv-msg"></div>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('resv-modal')">Cancel</button><button class="btn btn-primary" onclick="saveReservation()">🔖 Save reservation</button></div>
+</div></div>
+
+<div class="po-ovl" id="resv-list-modal"><div class="po-modal" style="width:min(580px,100%)">
+  <h3 class="po-modal-h">Reservations</h3>
+  <div class="po-modal-sub">Held units are already out of sellable stock. <b>✓ Sold</b> completes the deal; <b>✕</b> returns the units to stock.</div>
+  <div id="resv-list"></div>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('resv-list-modal')" style="flex:1">Close</button></div>
+</div></div>
+
+<div class="po-ovl po-ovl-top" id="resv-receipt-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Reservation receipt</h3><div class="po-modal-sub">Ready to paste into WhatsApp / Messenger.</div>
+  <pre class="po-invoice" id="resv-receipt-text"></pre>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('resv-receipt-modal')">Close</button><button class="btn btn-primary" onclick="copyResvReceipt(this)">📋 Copy receipt</button></div>
+</div></div>
+
+<!-- ══ WATERMARK MODAL (opened from Pre-orders toolbar) ══ -->
+<div class="po-ovl" id="wm-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Watermark photos</h3>
+  <div class="po-modal-sub">Stamps your logo bottom-right on every photo (35% opacity, fixed size) — ready for posts. Tap a preview to download just that one.</div>
+  <div class="import-drop">
+    <span class="import-drop-icon">🖼</span>
+    <div style="font-weight:600;color:var(--text);margin-bottom:4px">Tap to add photos</div>
+    <div style="font-size:12px;color:var(--text-3)">You can select multiple at once</div>
+    <input type="file" accept="image/*" multiple onchange="handleWmFiles(this)">
+  </div>
+  <div class="wm-grid" id="wm-grid"></div>
+  <div class="po-modal-actions">
+    <button class="btn btn-outline" onclick="poClose('wm-modal')">Close</button>
+    <button class="btn btn-primary" id="wm-dl-btn" onclick="wmDownloadAll()" disabled>⬇ Download all</button>
+  </div>
+</div></div>
+
+<!-- ══ EVENTS MODAL (opened from Sell tab / topbar event chip) ══ -->
+<div class="po-ovl" id="events-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Events</h3>
+  <div class="po-modal-sub">Physical sales are filed under the active event.</div>
+  <div class="field-row">
+    <div class="field"><label>Event name</label><input id="ev-name" placeholder="e.g. Hobbycon KL June 2026" onkeydown="if(event.key==='Enter')createNewEvent()"></div>
+    <div class="field"><label>Date</label><input id="ev-date" type="date"></div>
+  </div>
+  <div class="field"><label>Location (optional)</label><input id="ev-loc" placeholder="e.g. Pavilion KL"></div>
+  <div class="btn-row" style="margin-top:4px">
+    <button class="btn btn-primary" onclick="createNewEvent()">+ Create event</button>
+  </div>
+  <div id="ev-msg"></div>
+  <div class="card-title" style="margin-top:18px">Your events</div>
+  <div id="event-list"><div class="empty-state"><span class="empty-icon">📅</span><div class="empty-title">No events yet</div></div></div>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('events-modal')" style="flex:1">Close</button></div>
+</div></div>
+
+<!-- ══ FULL BACKUP / RESTORE MODAL (opened from Inventory) ══ -->
+<div class="po-ovl" id="backup-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Backup &amp; Restore</h3>
+  <div class="po-modal-sub">One file with <b>everything</b>: products &amp; stock, the full sales log, events, pre-orders, reservations and the receipt counter. Keep a copy somewhere safe (send it to yourself on WhatsApp or Google Drive).</div>
+  <button class="btn btn-primary" onclick="downloadFullBackup()" style="width:100%">💾 Download full backup</button>
+  <div class="po-note" style="margin:14px 0 10px">Restoring <b>replaces all data in this browser</b> with the backup's contents, then reloads the app. Use it when moving to a new web address or a new device.</div>
+  <div class="import-drop">
+    <span class="import-drop-icon">📂</span>
+    <div style="font-weight:600;color:var(--text);margin-bottom:4px">Restore — drop a backup file here or tap to browse</div>
+    <div style="font-size:12px;color:var(--text-3)">.json backup files only</div>
+    <input type="file" accept=".json,application/json" onchange="handleRestoreFile(this)">
+  </div>
+  <div id="backup-msg"></div>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('backup-modal')" style="flex:1">Close</button></div>
+</div></div>
+
+<!-- ══ CSV IMPORT MODAL (opened from Inventory) ══ -->
+<div class="po-ovl" id="import-modal"><div class="po-modal">
+  <h3 class="po-modal-h">Import products from CSV</h3>
+  <div class="po-modal-sub">Columns: <strong>Name, Brand, Scale, Price, Stock</strong>. Barcode auto-generated if missing. Scale defaults to <strong>1:64</strong>.</div>
+  <div class="import-drop" id="import-drop">
+    <span class="import-drop-icon">📂</span>
+    <div style="font-weight:600;color:var(--text);margin-bottom:4px">Drop CSV here or tap to browse</div>
+    <div style="font-size:12px;color:var(--text-3)">.csv files only</div>
+    <input type="file" accept=".csv,text/csv" onchange="handleCSVImport(this)">
+  </div>
+  <div id="import-preview"></div>
+  <div id="import-msg"></div>
+  <div id="import-actions" style="display:none;margin-top:12px">
+    <div class="btn-row" style="margin-top:0">
+      <button class="btn btn-primary" onclick="confirmImport()">✓ Import <span id="import-count"></span> products</button>
+      <button class="btn btn-outline" onclick="cancelImport()">Reset</button>
+    </div>
+  </div>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="closeImportModal()" style="flex:1">Close</button></div>
+</div></div>
+
+<!-- ══ PRODUCT ADD/EDIT MODAL (opened from Inventory) ══ -->
+<div class="po-ovl" id="prod-modal"><div class="po-modal">
+  <h3 class="po-modal-h" id="form-mode-label">New product</h3>
+  <div class="field"><label>Look up existing barcode</label>
+    <div style="display:flex;gap:8px">
+      <input id="bc-input" style="flex:1" placeholder="Scan or type barcode…" onkeydown="if(event.key==='Enter')lookupBarcode()" inputmode="numeric">
+      <button class="btn btn-ghost" onclick="lookupBarcode()">Search</button>
+    </div>
+    <div id="bc-msg"></div>
+  </div>
+  <div class="field"><label>Barcode</label>
+    <div class="bc-field-wrap">
+      <input id="f-bc" placeholder="Auto-generated" inputmode="numeric">
+      <button class="bc-gen-btn" onclick="genBarcode()" type="button">⟳ Generate</button>
+    </div>
+  </div>
+  <div class="field-row">
+    <div class="field"><label>Brand</label>
+      <select id="f-brand">
+        <option>Mini GT</option><option>Hot Wheels</option><option>Kaido House</option>
+        <option>PopRace</option><option>INNO64</option><option>Tarmac Works</option>
+        <option>LCD Models</option><option>PEAKO</option><option>Tomica Limited Vintage</option><option>Other</option>
+      </select>
+    </div>
+    <div class="field"><label>Scale</label>
+      <select id="f-scale"><option>1:64</option><option>1:43</option><option>1:18</option><option>1:24</option></select>
+    </div>
+  </div>
+  <div class="field"><label>Product name</label><input id="f-name" placeholder="e.g. Nissan GT-R R34 – Bayside Blue #55"></div>
+  <div class="field-row">
+    <div class="field"><label>Selling price (RM)</label><input id="f-price" type="number" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
+    <div class="field"><label>Cost price (RM)</label><input id="f-cost" type="number" placeholder="0.00" step="0.01" min="0" inputmode="decimal"></div>
+  </div>
+  <div class="field"><label>Stock qty</label><input id="f-stock" type="number" placeholder="1" min="0" inputmode="numeric"></div>
+  <div class="field"><label>Product photo</label>
+    <div class="img-upload" id="img-box">
+      <span class="upload-icon">📷</span>
+      <span style="font-size:13px">Tap to upload photo</span>
+      <div class="upload-overlay">Change photo</div>
+      <input type="file" accept="image/*" onchange="handleImg(this)">
+    </div>
+  </div>
+  <div id="save-msg"></div>
+  <div class="po-modal-actions">
+    <button class="btn btn-danger" id="delete-btn" style="display:none" onclick="requirePin(()=>deleteFromForm())">✕ Delete</button>
+    <button class="btn btn-outline" onclick="closeProductModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveProduct()">✓ Save</button>
+  </div>
+</div></div>
 
 <!-- ══ PRE-ORDER MODALS ══ -->
 <div class="po-ovl" id="po-batch-modal"><div class="po-modal">

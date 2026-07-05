@@ -13,6 +13,8 @@ let receiptCounter = parseInt(localStorage.getItem('mhf_rc') || '0');
 let customers = JSON.parse(localStorage.getItem('mhf_cust') || '[]');
 let poBatches = JSON.parse(localStorage.getItem('mhf_pob')  || '[]');
 let poItems   = JSON.parse(localStorage.getItem('mhf_poi')  || '[]');
+// Reservations: holds on IN-STOCK items (units leave sellable stock while held)
+let reservations = JSON.parse(localStorage.getItem('mhf_resv') || '[]');
 
 // expose for sync.js
 window.products  = products;
@@ -21,6 +23,7 @@ window.events    = events;
 window.customers = customers;
 window.poBatches = poBatches;
 window.poItems   = poItems;
+window.reservations = reservations;
 
 function _localSave() {
   try {
@@ -31,7 +34,8 @@ function _localSave() {
     localStorage.setItem('mhf_cust', JSON.stringify(customers));
     localStorage.setItem('mhf_pob',  JSON.stringify(poBatches));
     localStorage.setItem('mhf_poi',  JSON.stringify(poItems));
-  } catch(e) { showMsg('save-msg', 'Storage full', 'err'); }
+    localStorage.setItem('mhf_resv', JSON.stringify(reservations));
+  } catch(e) { if (typeof poToast === 'function') poToast('Storage full — changes may not persist'); }
 }
 window._localSave = _localSave;
 
@@ -98,15 +102,18 @@ function nextReceiptNo() {
 // ── CODE 128B BARCODE ──
 const C128 = ['11011001100','11001101100','11001100110','10010011000','10010001100','10001001100','10011001000','10011000100','10001100100','11001001000','11001000100','11000100100','10110011100','10011011100','10011001110','10111001100','10011101100','10011100110','11001110010','11001011100','11001001110','11011100100','11001110100','11101101110','11101001100','11100101100','11100100110','11101100100','11100110100','11100110010','11011011000','11011000110','11000110110','10100011000','10001011000','10001000110','10110001000','10001101000','10001100010','11010001000','11000101000','11000100010','10110111000','10110001110','10001101110','10111011000','10111000110','10001110110','11101110110','11010001110','11000101110','11011101000','11011100010','11011101110','11101011000','11101000110','11100010110','11101101000','11101100010','11100011010','11101111010','11001000010','11110001010','10100110000','10100001100','10010110000','10010000110','10000101100','10000100110','10110010000','10110000100','10011010000','10011000010','10000110100','10000110010','11000010010','11001010000','11110111010','11000010100','10001111010','10100111100','10010111100','10010011110','10111100100','10011110100','10011110010','11110100100','11110010100','11110010010','11011011110','11011110110','11110110110','10101111000','10100011110','10001011110','10111101000','10111100010','11110101000','11110100010','10111011110','10111101110','11101011110','11110101110','11010000100','11010010000','11010011100','11000111010','11'];
 function code128B(t) { const v=[104]; for(let i=0;i<t.length;i++) v.push(t.charCodeAt(i)-32); let c=104; for(let i=1;i<v.length;i++) c+=v[i]*i; v.push(c%103); v.push(106); return v.map(x=>C128[x]).join(''); }
-function drawBarcode(text, bw, h, qz, fs) {
-  const p=code128B(text), cv=document.createElement('canvas'), lh=fs+6;
-  cv.width=p.length*bw+qz*2; cv.height=h+lh;
+// Bars only, supersampled `scale`× so the printer gets a high-DPI bitmap
+// (at scale 6 a 44mm-wide label works out to ~500dpi — no interpolation blur).
+// The human-readable digits are NOT baked into the canvas any more: they are
+// printed as real text under the image, so they stay vector-sharp at any
+// printer resolution instead of being a rasterized 7px bitmap.
+function drawBarcode(text, scale, h, qz) {
+  const p=code128B(text), cv=document.createElement('canvas');
+  cv.width=(p.length+qz*2)*scale; cv.height=h*scale;
   const ctx=cv.getContext('2d');
   ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
-  ctx.fillStyle='#000'; let x=qz;
-  for(let i=0;i<p.length;i++){if(p[i]==='1')ctx.fillRect(x,0,bw,h);x+=bw;}
-  ctx.font=`${fs}px monospace`; ctx.textAlign='center';
-  ctx.fillText(text,cv.width/2,h+lh-2);
+  ctx.fillStyle='#000'; let x=qz*scale;
+  for(let i=0;i<p.length;i++){if(p[i]==='1')ctx.fillRect(x,0,scale,cv.height);x+=scale;}
   return cv.toDataURL('image/png');
 }
 
@@ -247,7 +254,7 @@ function exitCashierMode() {
 
 // ── NAV ──
 let currentTab = 'inventory';
-const TITLES = { sell:'Sell', inventory:'Inventory', addedit:'Add / Edit', events:'Events', sold:'Sold Items', labels:'Print Labels', importexport:'Import / Export', history:'History', preorders:'Pre-orders' };
+const TITLES = { sell:'Sell', inventory:'Inventory', preorders:'Pre-orders', sales:'Sales', labels:'Print Labels' };
 function goTab(t) {
   if (t === currentTab) return;
   const op = document.getElementById('panel-' + currentTab);
@@ -261,13 +268,10 @@ function goTab(t) {
   const te = document.getElementById('topbar-title');
   te.style.opacity = '0'; setTimeout(() => { te.textContent = TITLES[t]; te.style.opacity = '1'; }, 100);
   if (t === 'inventory')    { renderInventory(); renderStats(); }
-  if (t === 'history')      { populateHistEventFilter(); setHistMode(histMode); }
+  if (t === 'sales')        { renderSales(); }
   if (t === 'labels')       { renderLabelList(''); }
-  if (t === 'events')       { renderEventList(); }
-  if (t === 'sold')         { renderSoldItems(); }
   if (t === 'preorders')    { renderPreorders(); }
   if (t === 'sell')         { updateTopbarEvent(); setSaleType(false, poDefaultSaleType()); renderSellCart(); setTimeout(() => document.getElementById('sell-input').focus(), 200); }
-  if (t === 'addedit' && !document.getElementById('f-bc').value) genBarcode();
 }
 
 // ── EVENTS (store events) ──
@@ -305,6 +309,10 @@ function refreshSaleTypeUI() {
   });
 }
 function saveActiveEvent() { localStorage.setItem('mhf_aev', activeEventId); }
+
+// Events live in a modal now (opened from the Sell tab / topbar chip) —
+// no dedicated tab.
+function openEventsModal() { renderEventList(); poOpen('events-modal'); }
 
 // NOTE: must NOT be named createEvent — inline on* handlers resolve names
 // against `document` first, where createEvent is a native (deprecated) method,
@@ -374,18 +382,71 @@ function _discNeedsApproval(sub, val, type) {
   return pct > CASHIER_DISC_LIMIT_PCT;
 }
 
+// Scan input doubles as a search bar: exact barcode first, then name/brand
+// text match (single hit adds straight to cart, several hits show a tap-to-
+// pick list). Shared by the Sell tab and the cashier lock screen.
 function scanSell() {
   const inp = document.getElementById('sell-input');
-  const bc = inp.value.trim(); inp.value = ''; inp.focus();
-  if (!bc) { showMsg('sell-msg','Nothing scanned','err'); beepErr(); return; }
-  const p = products.find(x => x.barcode === bc);
-  if (!p) { showMsg('sell-msg','Not found: '+bc,'err'); beepErr(); return; }
-  const ex = sellCart.find(c => c.barcode === bc);
+  const q = inp.value.trim(); inp.value = ''; inp.focus();
+  _sellSubmit(q, false);
+}
+function _sellMsg(isLock, t, k) { isLock ? lockMsg(t, k) : showMsg('sell-msg', t, k); }
+function _sellSubmit(q, isLock) {
+  _hideSuggest(isLock);
+  if (!q) { _sellMsg(isLock, 'Nothing scanned', 'err'); beepErr(); return; }
+  let p = products.find(x => x.barcode === q);
+  if (!p) {
+    const m = _nameMatches(q);
+    if (m.length === 1) p = m[0];
+    else if (m.length > 1) { _showSuggest(m, isLock); _sellMsg(isLock, `${m.length} matches for “${q}” — tap one`, 'ok'); return; }
+  }
+  if (!p) { _sellMsg(isLock, 'Not found: ' + q, 'err'); beepErr(); return; }
+  _cartAdd(p, isLock);
+}
+function _nameMatches(q) {
+  q = q.toLowerCase();
+  return products.filter(p => p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q)).slice(0, 6);
+}
+function _cartAdd(p, isLock) {
+  const ex = sellCart.find(c => c.barcode === p.barcode);
   // hard sold-out block — robust to missing/zero/NaN stock (no silent add)
-  if ((p.stock || 0) <= 0) { showMsg('sell-msg',p.name+' — Item is sold out','err'); beepErr(); return; }
-  if ((ex ? ex.qty : 0) >= p.stock) { showMsg('sell-msg',p.name+' — no more stock available','err'); beepErr(); return; }
+  if ((p.stock || 0) <= 0) { _sellMsg(isLock, p.name + ' — Item is sold out', 'err'); beepErr(); return; }
+  if ((ex ? ex.qty : 0) >= p.stock) { _sellMsg(isLock, p.name + ' — no more stock available', 'err'); beepErr(); return; }
   if (ex) { ex.qty++; } else { sellCart.push({ barcode:p.barcode, name:p.name, brand:p.brand, scale:p.scale, price:p.price, discPrice:undefined, qty:1, img:p.img||null }); }
-  beepOk(); showLastScan(p, ex?ex.qty:1); renderSellCart(); showMsg('sell-msg','','ok');
+  beepOk();
+  if (isLock) { lockShowLastScan(p, ex ? ex.qty : 1); lockRenderCart(); lockMsg('', 'ok'); }
+  else { showLastScan(p, ex ? ex.qty : 1); renderSellCart(); showMsg('sell-msg', '', 'ok'); }
+}
+// Live suggestions while typing a name. Barcode-looking input (digits / MH…)
+// is skipped so scanner bursts don't flash a list.
+function sellSuggestInput(isLock) {
+  const inp = document.getElementById(isLock ? 'lock-scan-input' : 'sell-input'); if (!inp) return;
+  const q = inp.value.trim();
+  if (q.length < 2 || /^\d+$/.test(q) || /^MH\d*$/i.test(q)) { _hideSuggest(isLock); return; }
+  const m = _nameMatches(q);
+  if (!m.length) { _hideSuggest(isLock); return; }
+  _showSuggest(m, isLock);
+}
+function _showSuggest(list, isLock) {
+  const el = document.getElementById(isLock ? 'lock-suggest' : 'sell-suggest'); if (!el) return;
+  el.innerHTML = list.map(p => `
+    <div class="suggest-row" onclick="pickSuggest('${p.barcode}',${isLock})">
+      ${p.img ? `<img class="ls-img" src="${p.img}" alt="">` : '<div class="ls-ph">🚗</div>'}
+      <div style="flex:1;min-width:0"><div class="suggest-name">${p.name}</div><div class="suggest-sub">${p.brand} · ${p.scale} · RM ${p.price.toFixed(2)}</div></div>
+      <span class="suggest-stock ${p.stock > 0 ? '' : 'out'}">${p.stock > 0 ? p.stock + ' in stock' : 'Sold out'}</span>
+    </div>`).join('');
+  el.classList.add('show');
+}
+function _hideSuggest(isLock) {
+  const el = document.getElementById(isLock ? 'lock-suggest' : 'sell-suggest');
+  if (el) { el.classList.remove('show'); el.innerHTML = ''; }
+}
+function pickSuggest(bc, isLock) {
+  const p = products.find(x => x.barcode === bc); if (!p) return;
+  _hideSuggest(isLock);
+  const inp = document.getElementById(isLock ? 'lock-scan-input' : 'sell-input');
+  if (inp) { inp.value = ''; inp.focus(); }
+  _cartAdd(p, isLock);
 }
 
 // Lock-screen status message (was referenced everywhere but never defined —
@@ -400,16 +461,8 @@ function lockMsg(text, type) {
 
 function lockScan() {
   const inp = document.getElementById('lock-scan-input');
-  const bc = inp.value.trim(); inp.value = ''; inp.focus();
-  if (!bc) { lockMsg('Nothing scanned','err'); beepErr(); return; }
-  const p = products.find(x => x.barcode === bc);
-  if (!p) { lockMsg('Not found: '+bc,'err'); beepErr(); return; }
-  const ex = sellCart.find(c => c.barcode === bc);
-  // hard sold-out block — robust to missing/zero/NaN stock (no silent add)
-  if ((p.stock || 0) <= 0) { lockMsg(p.name+' — Item is sold out','err'); beepErr(); return; }
-  if ((ex?ex.qty:0) >= p.stock) { lockMsg(p.name+' — no more stock available','err'); beepErr(); return; }
-  if (ex) { ex.qty++; } else { sellCart.push({ barcode:p.barcode, name:p.name, brand:p.brand, scale:p.scale, price:p.price, discPrice:undefined, qty:1, img:p.img||null }); }
-  beepOk(); lockShowLastScan(p, ex?ex.qty:1); lockRenderCart(); lockMsg('','ok');
+  const q = inp.value.trim(); inp.value = ''; inp.focus();
+  _sellSubmit(q, true);
 }
 
 let lastScanTimer = null;
@@ -829,16 +882,24 @@ async function copyToClipboard(text) {
 
 // ── INVENTORY ──
 let selectedRows = new Set();
+// Stat cards follow the active search/brand/scale filters, so filtering to
+// e.g. Hot Wheels shows that brand's product count, units, value and profit.
 function renderStats() {
-  const ts = products.reduce((a,p) => a+p.stock, 0);
-  const tw = products.reduce((a,p) => a+p.stock*p.price, 0);
-  const cost = products.reduce((a,p) => a+(p.cost||0)*p.stock, 0);
+  const q     = (document.getElementById('inv-q')?.value || '').trim();
+  const brand = document.getElementById('f-brand-filter')?.value || '';
+  const scale = document.getElementById('f-scale-filter')?.value || '';
+  const hasFilter = !!(q || brand || scale);
+  const list = hasFilter ? getFilteredSorted() : products;
+  const suffix = hasFilter ? ` — ${brand || scale || 'search'}${brand && scale ? ' ' + scale : ''}` : '';
+  const ts = list.reduce((a,p) => a+p.stock, 0);
+  const tw = list.reduce((a,p) => a+p.stock*p.price, 0);
+  const cost = list.reduce((a,p) => a+(p.cost||0)*p.stock, 0);
   const profit = tw - cost;
   document.getElementById('stats').innerHTML = `
-    <div class="stat-card accent"><div class="stat-label">Products</div><div class="stat-value">${products.length}</div></div>
-    <div class="stat-card"><div class="stat-label">Total units</div><div class="stat-value">${ts}</div></div>
-    <div class="stat-card"><div class="stat-label">Inventory value</div><div class="stat-value">RM ${tw.toFixed(0)}</div></div>
-    <div class="stat-card accent"><div class="stat-label">Potential profit</div><div class="stat-value">RM ${profit.toFixed(0)}</div></div>`;
+    <div class="stat-card accent"><div class="stat-label">Products${suffix}</div><div class="stat-value">${list.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Total units${suffix}</div><div class="stat-value">${ts}</div></div>
+    <div class="stat-card"><div class="stat-label">Inventory value${suffix}</div><div class="stat-value">RM ${tw.toFixed(0)}</div></div>
+    <div class="stat-card accent"><div class="stat-label">Potential profit${suffix}</div><div class="stat-value">RM ${profit.toFixed(0)}</div></div>`;
 }
 
 function getFilteredSorted() {
@@ -851,10 +912,17 @@ function getFilteredSorted() {
     (!brand || p.brand === brand) && (!scale || p.scale === scale)
   );
   const [col, dir] = sort.split('-');
-  f.sort((a,b) => { let va=a[col],vb=b[col]; if(typeof va==='string'){va=va.toLowerCase();vb=vb.toLowerCase();} return dir==='asc'?(va>vb?1:va<vb?-1:0):(va<vb?1:va>vb?-1:0); });
+  f.sort((a,b) => {
+    let va=a[col],vb=b[col]; if(typeof va==='string'){va=va.toLowerCase();vb=vb.toLowerCase();}
+    const c = dir==='asc'?(va>vb?1:va<vb?-1:0):(va<vb?1:va>vb?-1:0);
+    if (c) return c;
+    // tie-break alphabetically so equal prices/stocks still read A→Z
+    const na=a.name.toLowerCase(), nb=b.name.toLowerCase();
+    return na>nb?1:na<nb?-1:0;
+  });
   return f;
 }
-function applyFilters() { renderInventory(); }
+function applyFilters() { renderInventory(); renderStats(); }
 function cycleSortCol(col) { const sel=document.getElementById('f-sort'); sel.value=col+(sel.value===col+'-asc'?'-desc':'-asc'); applyFilters(); }
 
 function renderInventory() {
@@ -862,11 +930,15 @@ function renderInventory() {
   const f = getFilteredSorted();
   document.getElementById('inv-empty').style.display = f.length ? 'none' : 'block';
   document.getElementById('inv-result-count').textContent = f.length===products.length ? `${products.length} products` : `Showing ${f.length} of ${products.length}`;
-  document.getElementById('inv-body').innerHTML = f.map(p => `
-    <tr>
+  // Sold-out items don't mix with sellable stock: they sink to their own
+  // labelled section at the bottom (dimmed, still restockable/editable).
+  const inStock = f.filter(p => (p.stock || 0) > 0);
+  const oos     = f.filter(p => (p.stock || 0) <= 0);
+  const row = p => { const out = (p.stock || 0) <= 0; const held = resvUnitsFor(p.barcode); return `
+    <tr class="${out ? 'inv-oos' : ''}">
       <td><input type="checkbox" class="sel-check" id="ichk-${p.barcode}" onchange="toggleRowSelect('${p.barcode}',this.checked)"></td>
       <td>${p.img ? `<img class="thumb" src="${p.img}" alt="">` : `<div class="thumb-ph">🚗</div>`}</td>
-      <td><div class="prod-name">${p.name}</div><div class="prod-bc">${p.barcode}</div></td>
+      <td><div class="prod-name">${p.name}${out ? ' <span class="oos-pill">Sold out</span>' : ''}${held ? ` <span class="resv-pill">${held} reserved</span>` : ''}</div><div class="prod-bc">${p.barcode}</div></td>
       <td style="font-size:12px;color:var(--text-2)">${p.brand}<br><span style="color:var(--text-3);font-size:11px">${p.scale}</span></td>
       <td style="font-weight:700;color:var(--blue)">RM ${p.price.toFixed(2)}</td>
       <td><div class="stepper">
@@ -875,10 +947,14 @@ function renderInventory() {
         <button class="stepper-btn" onclick="adjustStock('${p.barcode}',1)">+</button>
       </div></td>
       <td><div class="action-cell">
+        ${out ? '' : `<button class="btn btn-outline btn-sm" onclick="openReserve('${p.barcode}')" title="Reserve for a customer">🔖</button>`}
         <button class="btn btn-ghost btn-sm" onclick="editProduct('${p.barcode}')">Edit</button>
         <button class="btn btn-danger btn-sm" onclick="requirePin(()=>deleteProduct('${p.barcode}'))">✕</button>
       </div></td>
-    </tr>`).join('');
+    </tr>`; };
+  document.getElementById('inv-body').innerHTML = inStock.map(row).join('') +
+    (oos.length ? `<tr class="inv-oos-divider"><td colspan="7">Out of stock — ${oos.length} item${oos.length !== 1 ? 's' : ''}</td></tr>` + oos.map(row).join('') : '');
+  updateResvBadge();
 }
 
 function toggleRowSelect(bc, ch) { if(ch) selectedRows.add(bc); else selectedRows.delete(bc); updateBulkBar(); }
@@ -887,10 +963,10 @@ function toggleSelectAll() { const all=document.querySelectorAll('[id^=ichk-]');
 function updateBulkBar() { const n=selectedRows.size; const bar=document.getElementById('bulk-bar'); if(n>0){bar.classList.add('show');document.getElementById('bulk-count').textContent=n+' selected';}else bar.classList.remove('show'); }
 function applyBulkEdit() {
   const np=document.getElementById('bulk-price').value; const ns=document.getElementById('bulk-stock').value;
-  if(!np&&!ns){showMsg('save-msg','Enter price or stock','err');return;}
+  if(!np&&!ns){poToast('Enter a price or stock value first');return;}
   let ch=0; selectedRows.forEach(bc=>{const p=products.find(x=>x.barcode===bc);if(!p)return;if(np!=='')p.price=parseFloat(np)||p.price;if(ns!=='')p.stock=Math.max(0,parseInt(ns)||0);ch++;save('PRODUCT_UPSERT',p);});
   document.getElementById('bulk-price').value=''; document.getElementById('bulk-stock').value='';
-  renderInventory(); renderStats(); showMsg('save-msg',ch+' products updated','ok');
+  renderInventory(); renderStats(); poToast(ch+' products updated');
 }
 function bulkDelete() {
   if(!selectedRows.size)return; if(!confirm(`Delete ${selectedRows.size} products?`))return;
@@ -899,18 +975,348 @@ function bulkDelete() {
 }
 function adjustStock(bc, delta) {
   const p=products.find(x=>x.barcode===bc); if(!p)return;
+  const wasOut=(p.stock||0)<=0;
   p.stock=Math.max(0,p.stock+delta);
   const el=document.getElementById('qty-'+bc); if(el) el.textContent=p.stock;
   save('STOCK_ADJUST',{barcode:bc,stock:p.stock}); renderStats();
+  // crossing the sold-out boundary moves the row between sections
+  if (wasOut !== ((p.stock||0)<=0)) renderInventory();
 }
 function deleteProduct(bc) {
   if(!confirm('Delete?'))return;
   products=products.filter(p=>p.barcode!==bc);
   save('PRODUCT_DELETE',{barcode:bc}); renderInventory(); renderStats();
 }
-function editProduct(bc) { goTab('addedit'); document.getElementById('bc-input').value=bc; lookupBarcode(); }
+// ── RESERVATIONS ──
+// Reserving deducts the units from sellable stock immediately (so they can't
+// be scanned/sold twice or show as available). "✓ Sold" converts the hold
+// into a normal sale record (stock already deducted — no double deduction);
+// "✕ Cancel" returns the units to stock. Each reservation snapshots the
+// product (name/price/img) so it stays readable even if the product changes.
+let _resvReceiptId = null;
+// One reservation can hold MULTIPLE cars for the same customer. Items live in
+// r.items[]; legacy single-car records (top-level barcode/qty) are normalized
+// through resvItems() so old data keeps working.
+function resvItems(r) {
+  return r.items || [{ barcode: r.barcode, prodName: r.prodName, brand: r.brand, scale: r.scale, price: r.price, qty: r.qty || 1, img: r.img || null }];
+}
+function resvTotal(r) { return resvItems(r).reduce((a, i) => a + i.price * i.qty, 0); }
+function resvUnitsFor(bc) { return reservations.reduce((a, r) => a + resvItems(r).filter(i => i.barcode === bc).reduce((b, i) => b + i.qty, 0), 0); }
+function updateResvBadge() {
+  const b = document.getElementById('resv-btn'); if (!b) return;
+  b.textContent = reservations.length ? `🔖 Reservations (${reservations.length})` : '🔖 Reservations';
+}
 
-// ── ADD/EDIT ──
+// ── create / edit modal (cart of cars) ──
+let _resvCart = [], _resvEditId = null, _resvReturnToList = false;
+function _resvSnap(p, qty) { return { barcode: p.barcode, prodName: p.name, brand: p.brand, scale: p.scale, price: p.price, qty: qty || 1, img: p.img || null }; }
+// units of this barcode already held by the reservation being edited — they're
+// free to re-use since they'd be returned on save
+function _resvOldQty(bc) {
+  if (!_resvEditId) return 0;
+  const r = reservations.find(x => x.id === _resvEditId);
+  return r ? resvItems(r).filter(i => i.barcode === bc).reduce((a, i) => a + i.qty, 0) : 0;
+}
+function _resvAvail(bc) { const p = products.find(x => x.barcode === bc); return (p ? p.stock || 0 : 0) + _resvOldQty(bc); }
+function _openResvModal() {
+  document.getElementById('resv-msg').innerHTML = '';
+  _poSet('resv-add', '');
+  ['resv-suggest', 'resv-name-suggest'].forEach(id => { const s = document.getElementById(id); if (s) { s.classList.remove('show'); s.innerHTML = ''; } });
+  renderResvCart();
+  poOpen('resv-modal');
+  setTimeout(() => { const i = document.getElementById('resv-name'); if (i && !i.value) i.focus(); }, 100);
+}
+function openReserve(bc) {
+  const p = products.find(x => x.barcode === bc); if (!p) return;
+  if ((p.stock || 0) <= 0) { poToast('No stock available to reserve'); return; }
+  _resvEditId = null; _resvReturnToList = false; _resvCart = [_resvSnap(p, 1)];
+  document.getElementById('resv-title').textContent = 'Reserve for customer';
+  ['resv-name', 'resv-phone', 'resv-deposit', 'resv-notes'].forEach(id => _poSet(id, ''));
+  _openResvModal();
+}
+function resvEdit(id) {
+  const r = reservations.find(x => x.id === id); if (!r) return;
+  poClose('resv-list-modal');   // the list would otherwise cover the edit modal
+  _resvEditId = id; _resvReturnToList = true; _resvCart = resvItems(r).map(i => ({ ...i }));
+  document.getElementById('resv-title').textContent = 'Edit reservation #' + (r.no || '');
+  _poSet('resv-name', r.customer); _poSet('resv-phone', r.phone || '');
+  _poSet('resv-deposit', r.deposit || 0); _poSet('resv-notes', r.notes || '');
+  _openResvModal();
+}
+// Typing a name while creating suggests customers who already hold a
+// reservation — picking one merges the new car(s) into their existing stash
+// instead of opening a second reservation for the same person.
+function resvNameSuggest() {
+  const el = document.getElementById('resv-name-suggest'); if (!el) return;
+  if (_resvEditId) { el.classList.remove('show'); el.innerHTML = ''; return; }   // already attached
+  const q = _poVal('resv-name').trim().toLowerCase();
+  const qd = q.replace(/\D/g, '');
+  if (q.length < 2) { el.classList.remove('show'); el.innerHTML = ''; return; }
+  const m = reservations.filter(r => r.customer.toLowerCase().includes(q) ||
+    (qd.length >= 3 && _normPhone(r.phone).includes(qd))).slice(0, 4);
+  if (!m.length) { el.classList.remove('show'); el.innerHTML = ''; return; }
+  el.innerHTML = m.map(r => {
+    const items = resvItems(r);
+    return `<div class="suggest-row" onclick="resvAttach('${r.id}')">
+      <div class="po-av">${_poInitials(r.customer)}</div>
+      <div style="flex:1;min-width:0"><div class="suggest-name">${_esc(r.customer)}</div>
+        <div class="suggest-sub">#${r.no || ''} · ${items.length} car(s) · Total RM ${resvTotal(r).toFixed(2)}</div></div>
+      <span class="suggest-stock">＋ Add to stash</span>
+    </div>`;
+  }).join('');
+  el.classList.add('show');
+}
+function resvAttach(id) {
+  const r = reservations.find(x => x.id === id); if (!r) return;
+  // merge the freshly-picked car(s) into their existing items
+  const merged = resvItems(r).map(i => ({ ...i }));
+  _resvCart.forEach(n => {
+    const ex = merged.find(i => i.barcode === n.barcode);
+    if (ex) ex.qty += n.qty; else merged.push({ ...n });
+  });
+  _resvEditId = id;   // becomes an edit — stock deltas only touch the additions
+  _resvCart = merged;
+  _resvCart.forEach(i => { i.qty = Math.min(i.qty, Math.max(1, _resvAvail(i.barcode))); });
+  _poSet('resv-name', r.customer); _poSet('resv-phone', r.phone || '');
+  _poSet('resv-deposit', r.deposit || 0); _poSet('resv-notes', r.notes || '');
+  document.getElementById('resv-title').textContent = `Add to ${r.customer}'s reservation #${r.no || ''}`;
+  const el = document.getElementById('resv-name-suggest'); if (el) { el.classList.remove('show'); el.innerHTML = ''; }
+  renderResvCart();
+}
+function renderResvCart() {
+  const el = document.getElementById('resv-items'); if (!el) return;
+  el.innerHTML = _resvCart.map(i => `
+    <div class="resv-line">
+      <div style="flex:1;min-width:0"><div class="suggest-name">${_esc(i.prodName)}</div><div class="suggest-sub">${_esc(i.brand)} · RM ${i.price.toFixed(2)} · ${_resvAvail(i.barcode)} available</div></div>
+      <div class="stepper">
+        <button class="stepper-btn" onclick="resvCartQty('${i.barcode}',-1)">−</button>
+        <span class="stepper-qty">${i.qty}</span>
+        <button class="stepper-btn" onclick="resvCartQty('${i.barcode}',1)">+</button>
+      </div>
+      <div class="resv-line-total">RM ${(i.price * i.qty).toFixed(2)}</div>
+      <button class="remove-btn" onclick="resvCartRemove('${i.barcode}')">✕</button>
+    </div>`).join('') || '<div class="po-empty" style="padding:12px">No cars yet — search below to add one</div>';
+  resvUpdateBalance();
+}
+function resvUpdateBalance() {
+  const el = document.getElementById('resv-balance'); if (!el) return;
+  const total = _resvCart.reduce((a, i) => a + i.price * i.qty, 0);
+  const dep = parseFloat(_poVal('resv-deposit')) || 0;
+  el.textContent = _resvCart.length
+    ? `Items total RM ${total.toFixed(2)} · Balance after deposit RM ${Math.max(0, total - dep).toFixed(2)}` : '';
+}
+function resvCartQty(bc, d) {
+  const i = _resvCart.find(x => x.barcode === bc); if (!i) return;
+  const max = Math.max(1, _resvAvail(bc));
+  i.qty = Math.min(max, Math.max(1, i.qty + d));
+  renderResvCart();
+}
+function resvCartRemove(bc) { _resvCart = _resvCart.filter(x => x.barcode !== bc); renderResvCart(); }
+function resvAddSuggest() {
+  const el = document.getElementById('resv-suggest'); if (!el) return;
+  const q = _poVal('resv-add').trim().toLowerCase();
+  if (q.length < 2) { el.classList.remove('show'); el.innerHTML = ''; return; }
+  const m = products.filter(p => ((p.stock || 0) > 0 || _resvOldQty(p.barcode) > 0) &&
+    (p.barcode.toLowerCase() === q || p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q))).slice(0, 5);
+  if (!m.length) { el.classList.remove('show'); el.innerHTML = ''; return; }
+  el.innerHTML = m.map(p => `
+    <div class="suggest-row" onclick="resvAddPick('${p.barcode}')">
+      ${p.img ? `<img class="ls-img" src="${p.img}" alt="">` : '<div class="ls-ph">🚗</div>'}
+      <div style="flex:1;min-width:0"><div class="suggest-name">${_esc(p.name)}</div><div class="suggest-sub">${_esc(p.brand)} · RM ${p.price.toFixed(2)}</div></div>
+      <span class="suggest-stock">${_resvAvail(p.barcode)} available</span>
+    </div>`).join('');
+  el.classList.add('show');
+}
+function resvAddPick(bc) {
+  const p = products.find(x => x.barcode === bc); if (!p) return;
+  const ex = _resvCart.find(i => i.barcode === bc);
+  if (ex) { if (ex.qty < _resvAvail(bc)) ex.qty++; }
+  else _resvCart.push(_resvSnap(p, 1));
+  _poSet('resv-add', '');
+  const s = document.getElementById('resv-suggest'); if (s) { s.classList.remove('show'); s.innerHTML = ''; }
+  renderResvCart();
+}
+function resvAddSubmit() {
+  const q = _poVal('resv-add').trim(); if (!q) return;
+  const exact = products.find(p => p.barcode === q);
+  if (exact) { resvAddPick(exact.barcode); return; }
+  const rows = document.querySelectorAll('#resv-suggest .suggest-row');
+  if (rows.length === 1) rows[0].click();
+}
+// stock delta between the reservation's previous items and the new cart —
+// returns increases, deducts additions, in one pass
+function _resvApplyStockDelta(oldItems, newItems) {
+  const m = {};
+  oldItems.forEach(i => m[i.barcode] = (m[i.barcode] || 0) + i.qty);
+  newItems.forEach(i => m[i.barcode] = (m[i.barcode] || 0) - i.qty);
+  Object.entries(m).forEach(([bc, delta]) => {
+    if (!delta) return;
+    const p = products.find(x => x.barcode === bc); if (!p) return;
+    p.stock = Math.max(0, (p.stock || 0) + delta);
+    save('STOCK_ADJUST', { barcode: bc, stock: p.stock });
+  });
+}
+function saveReservation() {
+  const name = _poVal('resv-name').trim();
+  if (!name) { showMsg('resv-msg', 'Customer name is required', 'err'); return; }
+  if (!_resvCart.length) { showMsg('resv-msg', 'Add at least one car', 'err'); return; }
+  for (const i of _resvCart) {
+    const avail = _resvAvail(i.barcode);
+    if (i.qty > avail) { showMsg('resv-msg', `Only ${avail} available for ${i.prodName}`, 'err'); return; }
+  }
+  const old = _resvEditId ? reservations.find(x => x.id === _resvEditId) : null;
+  _resvApplyStockDelta(old ? resvItems(old) : [], _resvCart);
+  const r = {
+    id: old ? old.id : 'rsv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    no: old ? old.no : 'R' + Date.now().toString(36).slice(-5).toUpperCase(),
+    customer: name, phone: _poVal('resv-phone').trim(),
+    deposit: parseFloat(_poVal('resv-deposit')) || 0, notes: _poVal('resv-notes').trim(),
+    items: _resvCart.map(i => ({ ...i })),
+    createdAt: old ? old.createdAt : new Date().toLocaleString('en-MY'),
+    timestamp: old ? old.timestamp : Date.now()
+  };
+  if (old) { const ix = reservations.findIndex(x => x.id === old.id); if (ix >= 0) reservations[ix] = r; }
+  else reservations.unshift(r);
+  save('RESV_UPSERT', r);
+  const wasEdit = !!old;
+  _resvEditId = null; _resvCart = [];
+  poClose('resv-modal');
+  renderInventory(); renderStats(); renderReservations();
+  if (_resvReturnToList) { openReservations(); _resvReturnToList = false; }   // came from the list — take the user back
+  const units = r.items.reduce((a, i) => a + i.qty, 0);
+  poToast(`${wasEdit ? 'Updated' : 'Reserved'} — ${r.items.length} car(s), ${units} unit(s) for ${name}`);
+}
+function openReservations() { renderReservations(); poOpen('resv-list-modal'); }
+function renderReservations() {
+  updateResvBadge();
+  const el = document.getElementById('resv-list'); if (!el) return;
+  if (!reservations.length) {
+    el.innerHTML = '<div class="empty-state"><span class="empty-icon">🔖</span><div class="empty-title">No reservations</div><div class="empty-sub">Use the 🔖 button on an inventory row to hold a car for a customer</div></div>';
+    return;
+  }
+  el.innerHTML = reservations.map(r => {
+    const items = resvItems(r);
+    const total = resvTotal(r), bal = Math.max(0, total - (r.deposit || 0));
+    const first = items[0] || {};
+    const carsLine = items.map(i => `${_esc(i.prodName)} ×${i.qty}`).join(', ');
+    return `<div class="resv-row">
+      ${first.img ? `<img class="sold-thumb" src="${first.img}" alt="">` : '<div class="sold-ph">🚗</div>'}
+      <div class="resv-info">
+        <div class="resv-name">👤 ${_esc(r.customer)} <span class="resv-no">#${r.no || ''}</span>${r.phone ? ` <span class="resv-no">· 📞 ${_esc(r.phone)}</span>` : ''}</div>
+        <div class="resv-sub resv-cars">🚗 ${carsLine}</div>
+        <div class="resv-sub">Total <b>RM ${total.toFixed(2)}</b> · Deposit <b>RM ${(r.deposit || 0).toFixed(2)}</b> · Balance <b class="resv-due">RM ${bal.toFixed(2)}</b> · ${_esc((r.createdAt || '').split(',')[0])}${r.notes ? ' · 📝 ' + _esc(r.notes) : ''}</div>
+      </div>
+      <div class="resv-actions">
+        <button class="btn btn-outline btn-sm" onclick="resvEdit('${r.id}')" title="Edit / add cars">✎</button>
+        <button class="btn btn-ghost btn-sm" onclick="openResvReceipt('${r.id}')">📋 Receipt</button>
+        <button class="btn btn-primary btn-sm" onclick="resvMarkSold('${r.id}')">✓ Sold</button>
+        <button class="btn btn-danger btn-sm" onclick="resvCancel('${r.id}')" title="Cancel & return to stock">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function resvMarkSold(id) {
+  const r = reservations.find(x => x.id === id); if (!r) return;
+  const items = resvItems(r);
+  const total = resvTotal(r);
+  const units = items.reduce((a, i) => a + i.qty, 0);
+  poConfirm(`Complete the deal — mark <b>${items.length} car(s) (${units} unit${units !== 1 ? 's' : ''})</b> as sold to <b>${_esc(r.customer)}</b> for <b>RM ${total.toFixed(2)}</b>?`, () => {
+    const rNo = nextReceiptNo(); const now = Date.now();
+    const salesType = poDefaultSaleType(); const ev = getActiveEvent();
+    const rec = { id: 's_' + now, receiptNo: rNo, receiptNumber: rNo,
+      date: new Date().toLocaleString('en-MY'), timestamp: now,
+      items: items.map(i => i.prodName + ' ×' + i.qty).join(', '),
+      arr: items.map(i => ({ barcode: i.barcode, name: i.prodName, brand: i.brand, scale: i.scale, price: i.price, discPrice: undefined, qty: i.qty, img: i.img || null })),
+      subtotal: total.toFixed(2), discount: '0.00', discType: 'rm', total: total.toFixed(2),
+      paymentMethod: 'Cash', customer: r.customer,
+      salesType, event: salesType === 'Physical' ? (ev ? ev.name : 'No event') : ONLINE_EVENT,
+      platform: salesType === 'Online' ? 'Other' : 'None',
+      eventId: salesType === 'Physical' && ev ? ev.id : null,
+      eventName: salesType === 'Physical' ? (ev ? ev.name : 'No event') : '',
+      cashier: (window.SyncEngine && window.SyncEngine.deviceId) || 'Cashier',
+      fromReservation: r.no || r.id };
+    sales.unshift(rec); save('SALE', rec);
+    // Stock was already deducted when the reservation was made. Remote devices
+    // deduct again on the SALE event, so follow with absolute STOCK_ADJUSTs
+    // (ordered after the sale) to correct them; local stock is untouched.
+    items.forEach(i => {
+      const p = products.find(x => x.barcode === i.barcode);
+      if (p) save('STOCK_ADJUST', { barcode: p.barcode, stock: p.stock });
+    });
+    save('RESV_UPSERT', { id, _deleted: true });
+    renderReservations(); renderInventory(); renderStats();
+    showReceipt(rec);
+  });
+}
+function resvCancel(id) {
+  const r = reservations.find(x => x.id === id); if (!r) return;
+  const items = resvItems(r);
+  const units = items.reduce((a, i) => a + i.qty, 0);
+  poConfirm(`Cancel this reservation for <b>${_esc(r.customer)}</b> and return ${units} unit(s) to stock?` +
+    ((r.deposit || 0) > 0 ? `<br><span style="font-size:12px;color:var(--text-3)">Deposit RM ${r.deposit.toFixed(2)} was collected — handle any refund yourself.</span>` : ''), () => {
+    items.forEach(i => {
+      const p = products.find(x => x.barcode === i.barcode);
+      if (p) { p.stock = (p.stock || 0) + i.qty; save('STOCK_ADJUST', { barcode: p.barcode, stock: p.stock }); }
+    });
+    save('RESV_UPSERT', { id, _deleted: true });
+    renderReservations(); renderInventory(); renderStats();
+    poToast('Reservation cancelled — stock returned');
+  });
+}
+// reservation slip (same copy-text house style as receipts/invoices)
+function resvReceiptText(r) {
+  const R = '—'.repeat(17), L = [];
+  const items = resvItems(r);
+  const total = resvTotal(r), bal = Math.max(0, total - (r.deposit || 0));
+  L.push('🔖 MobiHobby');
+  L.push('Reservation Slip');
+  L.push(R);
+  L.push('Reservation #' + (r.no || '—'));
+  L.push(r.createdAt || '');
+  L.push('Customer: ' + r.customer);
+  if (r.phone) L.push('Phone: ' + r.phone);
+  L.push(R);
+  items.forEach((i, k) => {
+    L.push(`${k + 1}. ${i.prodName}`);
+    L.push(`   ${i.brand} · ${i.scale}`);
+    L.push(`   ${i.qty} × ${_money(i.price)} = ${_money(i.price * i.qty)}`);
+    if (k < items.length - 1) L.push('');
+  });
+  L.push(R);
+  L.push('Items total   ' + _money(total));
+  L.push('Deposit paid  ' + _money(r.deposit || 0));
+  L.push('BALANCE DUE   ' + _money(bal));
+  L.push(R);
+  if (r.notes) { L.push('📝 ' + r.notes); L.push(R); }
+  L.push('🚗 These units are reserved & held');
+  L.push('just for you. Kindly settle the');
+  L.push('balance to complete the deal.');
+  L.push('Thank you for choosing MobiHobby! 🙏');
+  return L.join('\n');
+}
+function openResvReceipt(id) {
+  const r = reservations.find(x => x.id === id); if (!r) return;
+  _resvReceiptId = id;
+  document.getElementById('resv-receipt-text').textContent = resvReceiptText(r);
+  poOpen('resv-receipt-modal');
+}
+async function copyResvReceipt(btn) {
+  const r = reservations.find(x => x.id === _resvReceiptId); if (!r) return;
+  const ok = await copyToClipboard(resvReceiptText(r));
+  if (btn) { const o = btn.textContent; btn.textContent = ok ? '✓ Copied' : '⚠ Failed'; setTimeout(() => { btn.textContent = o; }, 1600); }
+}
+
+// ── ADD/EDIT (modal on the Inventory page) ──
+// Add Item and Edit share the same form; the modal closes itself after a
+// successful save and the inventory list refreshes in place — no tab switch.
+function openAddProduct() { clearForm(); poOpen('prod-modal'); setTimeout(() => { const i = document.getElementById('f-name'); if (i) i.focus(); }, 100); }
+function editProduct(bc) {
+  clearForm();
+  document.getElementById('bc-input').value = bc;
+  lookupBarcode();
+  poOpen('prod-modal');
+}
+function closeProductModal() { poClose('prod-modal'); clearForm(); }
 let editingBc=null, pendingImg=null;
 function handleImg(input) {
   const file=input.files[0]; if(!file)return;
@@ -959,7 +1365,7 @@ function saveProduct() {
     const i=products.findIndex(p=>p.barcode===editingBc);
     if(i>=0) prod.img = pendingImg || products[i].img || null;
     if(i>=0) products[i]={...products[i],...prod};
-    showMsg('save-msg','Updated','ok');
+    poToast('Product updated');
   } else {
     if(products.find(p=>p.barcode===bc)){showMsg('save-msg','Barcode already exists','err');return;}
     // duplicate name check for new products
@@ -969,11 +1375,13 @@ function saveProduct() {
       return;
     }
     products.push(prod);
-    showMsg('save-msg','Product added','ok');
+    poToast('Product added');
   }
-  save('PRODUCT_UPSERT', prod); clearForm(); renderStats();
+  save('PRODUCT_UPSERT', prod);
+  closeProductModal();
+  renderInventory(); renderStats();
 }
-function deleteFromForm() { if(!editingBc||!confirm('Delete?'))return; save('PRODUCT_DELETE',{barcode:editingBc}); products=products.filter(p=>p.barcode!==editingBc); _localSave(); clearForm(); renderStats(); }
+function deleteFromForm() { if(!editingBc||!confirm('Delete?'))return; save('PRODUCT_DELETE',{barcode:editingBc}); products=products.filter(p=>p.barcode!==editingBc); _localSave(); closeProductModal(); renderInventory(); renderStats(); }
 function clearForm() {
   ['f-bc','f-name','f-price','f-stock','f-cost'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('bc-input').value=''; document.getElementById('f-brand').value='Mini GT'; document.getElementById('f-scale').value='1:64';
@@ -1107,8 +1515,11 @@ function renderCashierSold(q) {
 // ── LABELS ──
 function renderLabelList(q) {
   const list = document.getElementById('label-list');
-  if (!products.length) { list.innerHTML='<div class="empty-state"><span class="empty-icon">🏷️</span><div class="empty-title">No products</div></div>'; updateLabelBadge(); return; }
-  const f = q ? products.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.brand.toLowerCase().includes(q.toLowerCase())) : products;
+  // out-of-stock items are excluded — no point printing labels for units you
+  // don't have (restock them first and they reappear here)
+  const avail = products.filter(p => (p.stock || 0) > 0);
+  if (!avail.length) { list.innerHTML='<div class="empty-state"><span class="empty-icon">🏷️</span><div class="empty-title">No in-stock products</div><div class="empty-sub">Out-of-stock items are hidden from label printing</div></div>'; updateLabelBadge(); return; }
+  const f = q ? avail.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.brand.toLowerCase().includes(q.toLowerCase())) : avail;
   list.innerHTML = f.map(p => `
     <div class="label-row" id="lr-${p.barcode}">
       <input type="checkbox" class="label-row-check" id="lc-${p.barcode}" onchange="onLabelCheck('${p.barcode}')">
@@ -1144,14 +1555,14 @@ function printLabelSheet() {
   for (let i=0; i<items.length; i+=PERPAGE) pages.push(items.slice(i,i+PERPAGE));
 
   const bcCache = {};
-  items.forEach(p => { if (!bcCache[p.barcode]) bcCache[p.barcode] = drawBarcode(p.barcode,1,38,8,7); });
+  items.forEach(p => { if (!bcCache[p.barcode]) bcCache[p.barcode] = drawBarcode(p.barcode,6,38,8); });
 
   const sheetsHtml = pages.map(page => {
     while (page.length < PERPAGE) page.push(null);
     return `<div class="sheet">${page.map(p => {
       if (!p) return `<div class="lbl"></div>`;
       const name = p.name.length > 28 ? p.name.substring(0,26)+'…' : p.name;
-      return `<div class="lbl"><div class="lbl-name">${name}</div><div class="lbl-brand">${p.brand} ${p.scale}</div><img class="lbl-bc" src="${bcCache[p.barcode]}" alt="${p.barcode}"><div class="lbl-price">RM ${p.price.toFixed(2)}</div></div>`;
+      return `<div class="lbl"><div class="lbl-name">${name}</div><div class="lbl-brand">${p.brand} ${p.scale}</div><img class="lbl-bc" src="${bcCache[p.barcode]}" alt="${p.barcode}"><div class="lbl-bc-text">${p.barcode}</div><div class="lbl-price">RM ${p.price.toFixed(2)}</div></div>`;
     }).join('')}</div>`;
   }).join('');
 
@@ -1162,7 +1573,8 @@ function printLabelSheet() {
   .lbl{width:50mm;height:30mm;border:.3pt solid #bbb;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1.5mm 2mm;text-align:center;overflow:hidden}
   .lbl-name{font-size:6.5pt;font-weight:700;color:#000;line-height:1.2;margin-bottom:.5mm}
   .lbl-brand{font-size:5.5pt;color:#555;margin-bottom:.5mm}
-  .lbl-bc{width:44mm;height:auto;display:block;margin:0 auto}
+  .lbl-bc{width:44mm;height:8mm;display:block;margin:0 auto}
+  .lbl-bc-text{font-family:'Courier New',monospace;font-size:6.5pt;font-weight:600;color:#000;letter-spacing:1.5px;line-height:1.2;margin-top:.3mm}
   .lbl-price{font-size:9pt;font-weight:800;color:#002FA7;margin-top:.5mm}
   @media print{html,body{width:210mm}@page{size:A4 portrait;margin:0}.np{display:none}}</style></head><body>
   <div class="np" style="padding:12px 20px;background:#f0f4ff;font-family:Arial;font-size:13px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #c5d0f5">
@@ -1195,6 +1607,52 @@ function parseScale(raw) {
   const clean = raw.replace(/^="?|"?=?$/g,'').replace(/^"|"$/g,'').trim();
   if (/^\d*\.\d+$/.test(clean)) { const n=parseFloat(clean); if(n>0&&n<1) return `1:${Math.round(1/n)}`; }
   return clean || '1:64';
+}
+
+// CSV import lives in a modal opened from the Inventory toolbar.
+function openImportModal() { cancelImport(); poOpen('import-modal'); }
+function closeImportModal() { cancelImport(); poClose('import-modal'); }
+
+// ── FULL BACKUP / RESTORE ──
+// Everything the app stores, in one JSON file: products & stock, the whole
+// sales log, events, pre-orders, reservations, receipt counter. Restore
+// replaces this browser's data and reloads (it does NOT broadcast to other
+// devices — they keep their own state / the Firebase event log).
+function openBackup() { const m = document.getElementById('backup-msg'); if (m) m.innerHTML = ''; poOpen('backup-modal'); }
+function downloadFullBackup() {
+  const payload = {
+    app: 'mobihobby-pos', version: 1, exportedAt: new Date().toISOString(),
+    data: { products, sales, events, activeEventId, receiptCounter, customers, poBatches, poItems, reservations }
+  };
+  _poDownload('mobihobby_backup_' + new Date().toISOString().slice(0, 10) + '.json',
+    JSON.stringify(payload, null, 2), 'application/json');
+  poToast('Backup downloaded — keep a copy somewhere safe');
+}
+function handleRestoreFile(input) {
+  const f = input.files[0]; input.value = ''; if (!f) return;
+  const r = new FileReader();
+  r.onload = e => {
+    let d;
+    try { d = JSON.parse(e.target.result); } catch (err) { showMsg('backup-msg', 'Not a valid backup file', 'err'); return; }
+    const data = d && d.app === 'mobihobby-pos' && d.data ? d.data : null;
+    if (!data || !Array.isArray(data.products) || !Array.isArray(data.sales)) {
+      showMsg('backup-msg', 'Not a MobiHobby backup file', 'err'); return;
+    }
+    poConfirm(
+      `Restore backup from <b>${_esc((d.exportedAt || '').slice(0, 10) || 'unknown date')}</b>?<br>` +
+      `${data.products.length} products · ${data.sales.length} sales · ${(data.poItems || []).length} preorders · ${(data.reservations || []).length} reservations<br>` +
+      `<span style="font-size:12px;color:var(--danger)">This replaces ALL data currently in this browser.</span>`, () => {
+      products = data.products || []; sales = data.sales || []; events = data.events || [];
+      activeEventId = data.activeEventId || '';
+      receiptCounter = parseInt(data.receiptCounter) || 0;
+      customers = data.customers || []; poBatches = data.poBatches || []; poItems = data.poItems || [];
+      reservations = data.reservations || [];
+      localStorage.setItem('mhf_aev', activeEventId);
+      _localSave();
+      location.reload();   // clean re-init of every view + the sync engine
+    });
+  };
+  r.readAsText(f);
 }
 
 let pendingImportData = [];
@@ -1238,17 +1696,33 @@ function confirmImport() {
   pendingImportData=[];
   document.getElementById('import-preview').innerHTML='';
   document.getElementById('import-actions').style.display='none';
-  showMsg('import-msg',`Done — ${added} added, ${updated} updated`,'ok');
-  renderStats();
+  closeImportModal();
+  poToast(`Imported — ${added} added, ${updated} updated`);
+  renderInventory(); renderStats();
 }
 function cancelImport() { pendingImportData=[]; document.getElementById('import-preview').innerHTML=''; document.getElementById('import-actions').style.display='none'; document.getElementById('import-msg').innerHTML=''; }
+
+// ── SALES TAB (Transactions ⇆ Items sold in one place) ──
+let salesViewMode = 'transactions';
+function setSalesView(v) {
+  salesViewMode = v;
+  document.querySelectorAll('#sales-view-row .saletype-btn').forEach(b => b.classList.toggle('active', b.dataset.sview === v));
+  document.getElementById('sales-transactions').style.display = v === 'transactions' ? '' : 'none';
+  document.getElementById('sales-items').style.display = v === 'items' ? '' : 'none';
+  renderSales();
+}
+function renderSales() {
+  if (salesViewMode === 'transactions') { populateHistEventFilter(); setHistMode(histMode); }
+  else renderSoldItems();
+}
 
 // ── HISTORY ──
 function clearHistory() { if(!confirm('Clear ALL history?'))return; sales=[]; save('HISTORY_CLEAR', { timestamp: Date.now() }); renderHistory(); renderHistStats(); }
 // History has two mutually-exclusive report modes (per spec):
 //   events → Physical sales only (grouped by event, incl. Walk-in); excludes Online
 //   online → Online sales only (grouped/filtered by platform); excludes Physical
-let histMode = 'events';
+// Defaults to online — that's where most sales happen.
+let histMode = 'online';
 function setHistMode(mode) {
   histMode = mode;
   document.querySelectorAll('#hist-mode-row .saletype-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
@@ -1530,7 +2004,17 @@ function poBackStatus(itemId) {
     if (it.status === 'Ready To Ship' && prev === 'Awaiting Payment' && it.paidPrevDeposit !== undefined) {
       it.depositPaid = it.paidPrevDeposit; delete it.paidPrevDeposit;
     }
-    it.status = prev; save('POITEM_UPSERT', it); renderPreorders(); poToast('← ' + prev);
+    it.status = prev; save('POITEM_UPSERT', it);
+    // Re-entering Waiting Stock: if the batch has spare received stock, the
+    // standard FIFO allocation kicks in immediately (same path as receiving).
+    let allocatedBack = false;
+    if (prev === 'Waiting Stock') {
+      poAllocate(it.batchId);
+      const fresh = poItems.find(x => x.id === itemId);   // re-find: save() can replace the object
+      allocatedBack = !!fresh && fresh.status !== 'Waiting Stock';
+    }
+    renderPreorders();
+    poToast(allocatedBack ? '← Waiting Stock · stock available — re-allocated (Arrived)' : '← ' + prev);
   });
 }
 
@@ -1686,19 +2170,35 @@ function saveEditItem() {
 let _poPostBatch = null;
 function poBuildPost(batchId) {
   const b = poBatchById(batchId); const R = '—'.repeat(17); const L = [];
-  L.push('🔥 PRE-ORDER OPEN 🔥'); L.push(R);
-  L.push(`${b.brand ? b.brand + ' ' : ''}${b.modelName}`);
-  if (b.eta) L.push('📅 ETA: ' + b.eta);
-  L.push('💰 Price: RM ' + (Number(b.price) || 0).toFixed(2));
-  L.push('💵 Deposit: RM ' + (Number(b.deposit) || 0).toFixed(2) + ' to secure your unit');
+  const price = (Number(b.price) || 0).toFixed(2);
+  const dep = (Number(b.deposit) || 0).toFixed(2);
+  const bal = Math.max(0, (Number(b.price) || 0) - (Number(b.deposit) || 0)).toFixed(2);
+  L.push('🔥🔥 PRE-ORDER NOW OPEN 🔥🔥');
+  L.push('');
+  L.push(`🚗 ${b.brand ? b.brand + ' ' : ''}${b.modelName}`);
+  L.push('📏 1:64 scale die-cast');
+  L.push('📅 ETA: ' + (b.eta || 'TBA — we\'ll update you'));
   L.push(R);
-  L.push('How to order 👇');
-  L.push('1️⃣ PM / WhatsApp us to reserve');
-  L.push('2️⃣ Pay the deposit to confirm');
-  L.push('3️⃣ Settle balance when it arrives');
-  if (b.notes) { L.push(R); L.push(b.notes); }
+  L.push('💰 Price   : RM ' + price);
+  L.push('💵 Deposit : RM ' + dep + ' per unit');
+  L.push('🧾 Balance : RM ' + bal + ' (pay when it lands)');
   L.push(R);
-  L.push('MobiHobby 🏁 #preorder #diecast #164');
+  L.push('📦 HOW TO ORDER');
+  L.push('1️⃣ PM / WhatsApp us to reserve your unit(s)');
+  L.push('2️⃣ Pay the deposit to lock in your slot');
+  L.push('3️⃣ We\'ll message you the moment stock arrives');
+  L.push('4️⃣ Settle the balance & choose postage or pickup');
+  L.push('');
+  L.push('⚠️ Slots are limited & strictly first-come-');
+  L.push('first-served — once allocation is full,');
+  L.push('it\'s gone! Deposits secure your unit.');
+  if (b.notes) { L.push(R); L.push('📝 ' + b.notes); }
+  L.push(R);
+  L.push('🏁 MobiHobby — Diecast & Hobby Collectibles');
+  L.push('📲 DM us now to reserve yours today!');
+  L.push('');
+  L.push('#preorder #diecast #164scale #diecastcollector');
+  L.push('#diecastmalaysia #hobbycollectibles #MobiHobby');
   return L.join('\n');
 }
 function openPost(batchId) { _poPostBatch = batchId; document.getElementById('po-post-text').textContent = poBuildPost(batchId); poOpen('po-post-modal'); }
@@ -1748,6 +2248,83 @@ function poImport(input) {
   r.readAsText(f);
 }
 
+// ── "⋯ More" dropdown (secondary batch actions live here to keep the
+//    detail header uncluttered). Any click elsewhere closes it. ──
+function poCloseMenus() { document.querySelectorAll('.po-menu.open').forEach(m => m.classList.remove('open')); }
+function poToggleMenu(e, id) {
+  if (e) e.stopPropagation();
+  const m = document.getElementById(id); if (!m) return;
+  const wasOpen = m.classList.contains('open');
+  poCloseMenus();
+  if (!wasOpen) m.classList.add('open');
+}
+document.addEventListener('click', poCloseMenus);
+
+// ── PHOTO WATERMARK (fixed house style on purpose — logo bottom-right,
+//    35% opacity, width 22% of the photo; nothing is adjustable) ──
+let _wmLogoImg = null, _wmResults = [];
+function _wmLoadLogo() {
+  return new Promise((resolve, reject) => {
+    if (_wmLogoImg) return resolve(_wmLogoImg);
+    const img = new Image();
+    img.onload = () => { _wmLogoImg = img; resolve(img); };
+    img.onerror = () => {
+      const fb = new Image();
+      fb.onload = () => { _wmLogoImg = fb; resolve(fb); };
+      fb.onerror = () => reject(new Error('logo missing'));
+      fb.src = MH_LOGO_FALLBACK;
+    };
+    img.src = MH_LOGO_SRC;
+  });
+}
+function openWatermark() { _wmResults = []; _wmRenderGrid(); poOpen('wm-modal'); }
+async function handleWmFiles(input) {
+  const files = [...(input.files || [])]; input.value = '';
+  if (!files.length) return;
+  let logo;
+  try { logo = await _wmLoadLogo(); } catch (e) { poToast('Logo not found — put your logo at assets/logo.png'); return; }
+  for (const f of files) {
+    try { _wmResults.push(await _wmProcess(f, logo)); }
+    catch (e) { poToast('Skipped ' + (f.name || 'file') + ' — not a readable image'); }
+  }
+  _wmRenderGrid();
+}
+function _wmProcess(file, logo) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(img.src);
+      // cap the long edge at 1600px — plenty for social posts, keeps files light
+      const MAX = 1600; let w = img.width, h = img.height;
+      if (Math.max(w, h) > MAX) { const s = MAX / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      const ctx = cv.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      const lw = w * .22, lh = lw * (logo.height / logo.width), m = w * .03;
+      ctx.globalAlpha = .35;
+      ctx.drawImage(logo, w - lw - m, h - lh - m, lw, lh);
+      ctx.globalAlpha = 1;
+      const base = (file.name || 'photo').replace(/\.[^.]+$/, '');
+      resolve({ name: base + '_wm.jpg', url: cv.toDataURL('image/jpeg', .9) });
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+function _wmRenderGrid() {
+  const g = document.getElementById('wm-grid'); if (!g) return;
+  g.innerHTML = _wmResults.map((r, i) => `<img src="${r.url}" alt="" title="Tap to download" onclick="wmDownloadOne(${i})">`).join('');
+  const btn = document.getElementById('wm-dl-btn');
+  if (btn) { btn.disabled = !_wmResults.length; btn.textContent = _wmResults.length ? `⬇ Download all (${_wmResults.length})` : '⬇ Download all'; }
+}
+function _wmSave(r) { const a = document.createElement('a'); a.href = r.url; a.download = r.name; a.click(); }
+function wmDownloadOne(i) { if (_wmResults[i]) _wmSave(_wmResults[i]); }
+function wmDownloadAll() {
+  // small stagger — browsers drop rapid-fire downloads
+  _wmResults.forEach((r, i) => setTimeout(() => _wmSave(r), i * 250));
+  poToast(`Downloading ${_wmResults.length} watermarked photo(s)…`);
+}
+
 // ── selection ──
 function poSelectCustomer(id) { poSel = { customerId: id, batchId: null }; renderPreorders(); }
 function poSelectBatch(id) { poSel = { customerId: null, batchId: id }; renderPreorders(); }
@@ -1764,8 +2341,15 @@ function poBatchIsComplete(id) {
   const its = poItemsForBatch(id).filter(i => i.status !== 'Cancelled');
   return its.length > 0 && its.every(i => i.status === 'Completed');
 }
+// Settled = nothing still in progress (every non-cancelled item Completed).
+// An empty batch counts as settled — there is nothing owed on it.
+function poBatchSettled(id) {
+  return poItemsForBatch(id).filter(i => i.status !== 'Cancelled').every(i => i.status === 'Completed');
+}
 function archivePoBatch(id) {
   const b = poBatchById(id); if (!b) return;
+  const open = poItemsForBatch(id).filter(i => !['Cancelled', 'Completed'].includes(i.status)).length;
+  if (open) { poToast(`Can't archive — ${open} preorder(s) not settled yet`); return; }
   b.archived = true; save('POBATCH_UPSERT', b);
   if (poSel.batchId === id) poSel = { customerId: null, batchId: null };
   renderPreorders(); poToast('Batch archived (unarchive from the Archived view)');
@@ -1785,15 +2369,14 @@ function archiveCompletedBatches() {
 
 // ── render ──
 function renderPreorders() { renderPoDash(); renderPoModels(); renderPoCustomers(_poVal('po-search')); renderPoDetail(); }
+// Compact toolbar summary — the old 7-card dashboard made the page bottom-heavy.
+// Only the money that matters stays: outstanding balance + deposits held.
 function renderPoDash() {
   const el = document.getElementById('po-dash'); if (!el) return;
   const act = poItems.filter(i => i.status !== 'Cancelled');
-  const n = s => act.filter(i => i.status === s).length;
   const out = act.filter(poIsActive).reduce((a, i) => a + poItemOutstanding(i), 0);
   const dep = act.reduce((a, i) => a + (Number(i.depositPaid) || 0), 0);
-  const cards = [['Waiting', n('Waiting Stock'), ''], ['Arrived', n('Arrived'), ''], ['Awaiting Pay', n('Awaiting Payment'), ''],
-    ['Ready', n('Ready To Ship'), ''], ['Completed', n('Completed'), ''], ['Outstanding', 'RM ' + out.toFixed(0), 'accent'], ['Deposits', 'RM ' + dep.toFixed(0), 'accent']];
-  el.innerHTML = cards.map(([l, v, c]) => `<div class="stat-card ${c}"><div class="stat-label">${l}</div><div class="stat-value">${v}</div></div>`).join('');
+  el.innerHTML = `<span>Outstanding <b class="po-sum-due">RM ${out.toFixed(0)}</b></span><span>Deposits <b>RM ${dep.toFixed(0)}</b></span>`;
 }
 function renderPoModels() {
   const el = document.getElementById('po-models'); if (!el) return;
@@ -1914,17 +2497,25 @@ function poModelDetailHtml(id) {
   const b = poBatchById(id); if (!b) return '<div class="po-empty">Model not found</div>';
   const its = poItemsForBatch(id).filter(i => i.status !== 'Cancelled');
   const totQty = its.reduce((a, i) => a + i.qty, 0);
+  // Aligned grid (shared column template with a header row) so Qty / Deposit /
+  // Balance line up across rows and long names ellipsize instead of pushing
+  // the numbers around.
   const rows = its.map(it => {
     const c = poCustomerById(it.customerId);
     return `<div class="po-wrow" onclick="poSelectCustomer('${it.customerId}')">
       <div class="po-av">${_poInitials(c ? c.name : '?')}</div>
       <div class="po-cust-main"><div class="po-cust-name">${_esc(c ? c.name : '(unknown)')}</div><div class="po-cust-sub">${_esc(c ? c.platform : '')}</div></div>
-      <div class="po-wc">${it.qty}<span>Qty</span></div>
-      <div class="po-wc">RM ${(Number(it.depositPaid) || 0).toFixed(0)}<span>Deposit</span></div>
-      <div class="po-wc">RM ${poItemOutstanding(it).toFixed(0)}<span>Balance</span></div>
-      ${poBadge(it.status)}
+      <div class="po-wc">${it.qty}</div>
+      <div class="po-wc">RM ${(Number(it.depositPaid) || 0).toFixed(0)}</div>
+      <div class="po-wc">RM ${poItemOutstanding(it).toFixed(0)}</div>
+      <div class="po-wst">${poBadge(it.status)}</div>
     </div>`;
-  }).join('') || '<div class="po-empty">No customers yet — tap “Add Customer”.</div>';
+  }).join('');
+  const table = rows
+    ? `<div class="po-wtable">
+        <div class="po-whead"><span></span><span>Customer</span><span class="po-wc">Qty</span><span class="po-wc">Deposit</span><span class="po-wc">Balance</span><span>Status</span></div>
+        ${rows}</div>`
+    : '<div class="po-empty">No customers yet — tap “Add Customer”.</div>';
   return `<div class="po-detail-head">
       <div class="po-detail-img" ${poImgStyle(b)}>${poImgInner(b)}</div>
       <div style="flex:1;min-width:0"><div class="po-detail-name">${_esc(b.modelName)}</div>
@@ -1944,18 +2535,23 @@ function poModelDetailHtml(id) {
         ${b.notes ? `<div class="po-detail-sub">📝 ${_esc(b.notes)}</div>` : ''}</div>
       <div class="po-detail-actions">
         <button class="btn btn-primary btn-sm" onclick="openReceive('${b.id}')">📦 Receive Stock</button>
-        <button class="btn btn-warning btn-sm" onclick="poNotify('${b.id}')">🔔 Notify</button>
-        <button class="btn btn-ghost btn-sm" onclick="openPost('${b.id}')">📝 Copy post</button>
-        <button class="btn btn-outline btn-sm" onclick="poExportModelCSV('${b.id}')">⬇ Export</button>
         <button class="btn btn-ghost btn-sm" onclick="openAddCustomer('${b.id}')">＋ Add Customer</button>
-        ${b.archived
-          ? `<button class="btn btn-outline btn-sm" onclick="unarchivePoBatch('${b.id}')">📂 Unarchive</button>`
-          : `<button class="btn btn-outline btn-sm" onclick="archivePoBatch('${b.id}')">🗄 Archive</button>`}
-        <button class="btn btn-danger btn-sm" onclick="deletePoBatch('${b.id}')">🗑 Delete</button>
+        <button class="btn btn-warning btn-sm" onclick="poNotify('${b.id}')">🔔 Notify</button>
+        <div class="po-menu-wrap">
+          <button class="btn btn-outline btn-sm" onclick="poToggleMenu(event,'po-menu-${b.id}')">⋯ More</button>
+          <div class="po-menu" id="po-menu-${b.id}">
+            <button onclick="openPost('${b.id}')">📝 Copy post</button>
+            <button onclick="poExportModelCSV('${b.id}')">⬇ Export CSV</button>
+            ${b.archived
+              ? `<button onclick="unarchivePoBatch('${b.id}')">📂 Unarchive</button>`
+              : `<button onclick="archivePoBatch('${b.id}')" ${poBatchSettled(b.id) ? '' : 'disabled title="All preorders must be settled first"'}>🗄 Archive</button>`}
+            <button class="danger" onclick="deletePoBatch('${b.id}')">🗑 Delete batch</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="po-collapse-h" onclick="poToggleCollapse(this)"><span class="po-chev">▾</span> Customers (${its.length})</div>
-    <div>${rows}</div>`;
+    ${table}`;
 }
 
 // ── UTILS ──
@@ -1978,10 +2574,11 @@ function initDropzone() {
 // ── DATA SYNC LISTENER ──
 window.addEventListener('mh_data_updated', () => {
   if (currentTab === 'inventory') { renderInventory(); renderStats(); }
-  if (currentTab === 'history')   { renderHistory(); renderHistStats(); }
-  if (currentTab === 'sold')      { renderSoldItems(); }
+  if (currentTab === 'sales')     { renderSales(); }
   if (currentTab === 'preorders') { renderPreorders(); }
-  // keep the cashier read-only Sold Items view live while it is open
+  // keep the open modals/overlays live too
+  if (document.getElementById('events-modal')?.classList.contains('open')) renderEventList();
+  if (document.getElementById('resv-list-modal')?.classList.contains('open')) renderReservations();
   if (_cashierSoldOpen) renderCashierSold(document.getElementById('cs-search')?.value || '');
 });
 

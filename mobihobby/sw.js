@@ -1,7 +1,7 @@
 // ── MobiHobby POS — service worker ──
 // Caches the app shell so the POS opens instantly and works fully offline
 // from the home screen. Bump CACHE when any shell file changes.
-const CACHE = 'mobihobby-v1';
+const CACHE = 'mobihobby-v2';
 const SHELL = [
   './',
   './index.html',
@@ -33,16 +33,24 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   // only handle same-origin GETs; Firebase CDN + Firestore go straight to network
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
-  // navigations: network-first so a fresh deploy shows up, fall back to cached shell offline
-  if (req.mode === 'navigate') {
-    e.respondWith(fetch(req).catch(() => caches.match('./index.html')));
+  const path = new URL(req.url).pathname;
+  const isStaticAsset = /\.(png|jpg|jpeg|gif|svg|ico|webmanifest)$/i.test(path);
+  // Code + navigations → network-first: a fresh deploy always shows up online;
+  // the cache is only the offline fallback. This is why deploys aren't "stuck".
+  if (req.mode === 'navigate' || !isStaticAsset) {
+    e.respondWith(
+      fetch(req).then(res => {
+        if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
+        return res;
+      }).catch(() => caches.match(req).then(hit => hit || caches.match('./index.html')))
+    );
     return;
   }
-  // static assets: cache-first, then network (and cache what we fetch)
+  // Static assets (icons/logo) → cache-first for speed; rarely change.
   e.respondWith(
     caches.match(req).then(hit => hit || fetch(req).then(res => {
       if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
       return res;
-    }).catch(() => hit))
+    }))
   );
 });

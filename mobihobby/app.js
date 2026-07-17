@@ -1622,7 +1622,7 @@ function openBackup() { const m = document.getElementById('backup-msg'); if (m) 
 function downloadFullBackup() {
   const payload = {
     app: 'mobihobby-pos', version: 1, exportedAt: new Date().toISOString(),
-    data: { products, sales, events, activeEventId, receiptCounter, customers, poBatches, poItems, reservations }
+    data: { products, sales, events, activeEventId, receiptCounter, customers, poBatches, poItems, reservations, listingCounter }
   };
   _poDownload('mobihobby_backup_' + new Date().toISOString().slice(0, 10) + '.json',
     JSON.stringify(payload, null, 2), 'application/json');
@@ -1647,12 +1647,141 @@ function handleRestoreFile(input) {
       receiptCounter = parseInt(data.receiptCounter) || 0;
       customers = data.customers || []; poBatches = data.poBatches || []; poItems = data.poItems || [];
       reservations = data.reservations || [];
+      listingCounter = parseInt(data.listingCounter) || 0; _saveListNum();
       localStorage.setItem('mhf_aev', activeEventId);
       _localSave();
       location.reload();   // clean re-init of every view + the sync engine
     });
   };
   r.readAsText(f);
+}
+
+// ── FACEBOOK BATCH LISTINGS (desktop copy/paste helper) ──
+// Facebook blocks API posting to Groups, and bots risk your account — so this
+// stays a fast, safe helper for posting item listings as comments manually:
+// per item, copy the formatted text AND copy the photo to your clipboard, then
+// paste both into the group comment (works on a computer). A global running
+// number persists across posts/sessions and only advances when you tick an
+// item Posted, so numbers never repeat or skip.
+let listingCounter = parseInt(localStorage.getItem('mhf_listnum') || '0');
+function _saveListNum() { localStorage.setItem('mhf_listnum', String(listingCounter)); }
+let _listBatch = [];   // ordered [{ barcode, posted, num }]
+
+function openListingModal() {
+  _listBatch = [];
+  const s = document.getElementById('list-search'); if (s) s.value = '';
+  renderListPicker(''); renderListBatch();
+  poOpen('listing-modal');
+}
+function listFmtPrice(p) { const n = Number(p) || 0; return 'RM' + (Number.isInteger(n) ? String(n) : n.toFixed(2)); }
+function listingText(item, num) { return `${num}) ${item.name}\nAvailable: ${item.stock}\nPrice: ${listFmtPrice(item.price)}`; }
+
+function renderListPicker(q) {
+  const el = document.getElementById('list-picker'); if (!el) return;
+  const query = (q || '').toLowerCase().trim();
+  const inBatch = new Set(_listBatch.map(b => b.barcode));
+  let items = products.filter(p => (p.stock || 0) > 0 && !inBatch.has(p.barcode));
+  if (query) items = items.filter(p => p.name.toLowerCase().includes(query) || p.brand.toLowerCase().includes(query) || p.barcode.toLowerCase().includes(query));
+  if (!items.length) { el.innerHTML = '<div class="po-empty">No matching in-stock items</div>'; return; }
+  el.innerHTML = items.slice(0, 40).map(p => `
+    <div class="list-pick-row" onclick="listAdd('${p.barcode}')">
+      ${p.img ? `<img class="thumb" src="${p.img}" alt="">` : '<div class="thumb-ph">🚗</div>'}
+      <div style="flex:1;min-width:0"><div class="prod-name">${_esc(p.name)}</div><div class="prod-bc">${_esc(p.brand)} · Stock ${p.stock} · ${listFmtPrice(p.price)}</div></div>
+      <span class="list-add-btn">＋ Add</span>
+    </div>`).join('');
+}
+function listSearch(q) { renderListPicker(q); }
+function listAdd(bc) {
+  if (_listBatch.find(b => b.barcode === bc)) return;
+  _listBatch.push({ barcode: bc, posted: false, num: null });
+  renderListPicker(document.getElementById('list-search').value); renderListBatch();
+}
+function listRemove(bc) {
+  const it = _listBatch.find(b => b.barcode === bc);
+  if (it && it.posted) return;   // posted items are locked in
+  _listBatch = _listBatch.filter(b => b.barcode !== bc);
+  renderListPicker(document.getElementById('list-search').value); renderListBatch();
+}
+function renderListBatch() {
+  const el = document.getElementById('list-batch'); if (!el) return;
+  const nn = document.getElementById('list-next-num'); if (nn) nn.textContent = listingCounter + 1;
+  if (!_listBatch.length) { el.innerHTML = '<div class="po-empty">Add items on the left to build your batch.</div>'; return; }
+  let next = listingCounter + 1;
+  const firstUnpostedIdx = _listBatch.findIndex(b => !b.posted);
+  el.innerHTML = _listBatch.map((b, i) => {
+    const p = products.find(x => x.barcode === b.barcode) || {};
+    const num = b.posted ? b.num : next++;
+    const isCurrent = i === firstUnpostedIdx;
+    const hasPhoto = !!p.img;
+    return `<div class="list-item ${b.posted ? 'posted' : ''} ${isCurrent ? 'current' : ''}">
+      <div class="list-item-top">
+        <div class="list-num">${num}</div>
+        ${p.img ? `<img class="thumb" src="${p.img}" alt="">` : '<div class="thumb-ph">🚗</div>'}
+        <div class="list-item-main">
+          <div class="prod-name">${_esc(p.name || '(removed)')}</div>
+          <div class="list-preview">Available: ${p.stock ?? 0} · ${listFmtPrice(p.price)}</div>
+        </div>
+        ${b.posted ? `<span class="list-done-tag">✓ Posted #${b.num}</span>` : ''}
+      </div>
+      ${b.posted ? '' : `<div class="list-item-actions">
+        <button class="btn btn-ghost btn-sm" onclick="listCopyText('${b.barcode}',${num})">📋 Listing</button>
+        <button class="btn btn-ghost btn-sm" onclick="listCopyPhoto('${b.barcode}')" ${hasPhoto ? '' : 'disabled title="No photo on this item"'}>🖼 Photo</button>
+        <button class="btn btn-primary btn-sm" onclick="listMarkPosted('${b.barcode}')" ${isCurrent ? '' : 'disabled title="Do the highlighted item next"'}>✓ Posted</button>
+        <button class="list-x" onclick="listRemove('${b.barcode}')" title="Remove">✕</button>
+      </div>`}
+    </div>`;
+  }).join('');
+}
+async function listCopyText(bc, num) {
+  const p = products.find(x => x.barcode === bc); if (!p) return;
+  const ok = await copyToClipboard(listingText(p, num));
+  poToast(ok ? `Listing #${num} copied — paste into the comment` : 'Copy failed');
+}
+function _imgToPngBlob(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+      c.getContext('2d').drawImage(img, 0, 0);
+      c.toBlob(b => b ? resolve(b) : reject(new Error('blob failed')), 'image/png');
+    };
+    img.onerror = reject; img.src = dataUrl;
+  });
+}
+async function listCopyPhoto(bc) {
+  const p = products.find(x => x.barcode === bc); if (!p || !p.img) return;
+  try {
+    // pass a Promise<Blob> to ClipboardItem — supported by Chrome/Edge/Safari
+    const item = new ClipboardItem({ 'image/png': _imgToPngBlob(p.img) });
+    await navigator.clipboard.write([item]);
+    poToast('Photo copied — paste into the comment');
+  } catch (e) {
+    // clipboard image blocked/unsupported → download it so they can still attach
+    try {
+      const blob = await _imgToPngBlob(p.img);
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = (p.name || 'photo').replace(/\W+/g, '_') + '.png'; a.click();
+      poToast('Clipboard blocked — photo downloaded instead');
+    } catch (e2) { poToast('Could not copy the photo'); }
+  }
+}
+function listMarkPosted(bc) {
+  const it = _listBatch.find(b => b.barcode === bc); if (!it || it.posted) return;
+  const firstUnposted = _listBatch.find(b => !b.posted);
+  if (firstUnposted !== it) { poToast('Post items in order — do the highlighted one next'); return; }
+  it.num = ++listingCounter; it.posted = true; _saveListNum();
+  renderListBatch();
+  poToast(`Marked #${it.num} posted · next is ${listingCounter + 1}`);
+}
+function listSetNextNum() {
+  const v = prompt('Set the NEXT listing number:', String(listingCounter + 1));
+  if (v === null) return;
+  const n = parseInt(v);
+  if (isNaN(n) || n < 1) { poToast('Enter a number 1 or higher'); return; }
+  const maxPosted = _listBatch.filter(b => b.posted).reduce((a, b) => Math.max(a, b.num), 0);
+  if (n <= maxPosted) { poToast(`Already posted up to #${maxPosted} in this batch`); return; }
+  listingCounter = n - 1; _saveListNum(); renderListBatch();
+  poToast(`Next number set to ${n}`);
 }
 
 let pendingImportData = [];

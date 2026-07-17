@@ -193,6 +193,7 @@
           <div class="inv-toolbar">
             <button class="btn btn-primary btn-sm" onclick="openAddProduct()">＋ Add Item</button>
             <button class="btn btn-outline btn-sm" id="resv-btn" onclick="openReservations()">🔖 Reservations</button>
+            <button class="btn btn-outline btn-sm" onclick="openListingModal()">📣 FB Listings</button>
             <button class="btn btn-outline btn-sm" onclick="openImportModal()">⬆ Import CSV</button>
             <button class="btn btn-outline btn-sm" onclick="exportCSV()">⬇ Export Inventory</button>
             <button class="btn btn-outline btn-sm" onclick="openBackup()">💾 Backup</button>
@@ -473,6 +474,25 @@
   <div class="card-title" style="margin-top:18px">Your events</div>
   <div id="event-list"><div class="empty-state"><span class="empty-icon">📅</span><div class="empty-title">No events yet</div></div></div>
   <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('events-modal')" style="flex:1">Close</button></div>
+</div></div>
+
+<!-- ══ FACEBOOK BATCH LISTINGS MODAL (opened from Inventory) ══ -->
+<div class="po-ovl" id="listing-modal"><div class="po-modal" style="width:min(860px,100%)">
+  <h3 class="po-modal-h">Facebook batch listings</h3>
+  <div class="po-modal-sub">Post each item as a comment under your group post. Per item: <b>Copy Listing</b> and <b>Copy Photo</b>, then in the comment paste the text, paste the photo, post — then tick <b>Posted</b>. Numbering keeps going across posts. (Pasting a photo works on a computer.)</div>
+  <div class="list-nextbar">Next number: <b id="list-next-num">1</b><button class="btn btn-outline btn-sm" onclick="listSetNextNum()">Set number</button></div>
+  <div class="list-cols">
+    <div class="list-col">
+      <div class="list-col-title">In-stock items — tap to add</div>
+      <input id="list-search" class="po-search" placeholder="Search name / brand / barcode…" autocomplete="off" oninput="listSearch(this.value)">
+      <div id="list-picker" class="list-picker"></div>
+    </div>
+    <div class="list-col">
+      <div class="list-col-title">Your batch (posting order)</div>
+      <div id="list-batch" class="list-batch"></div>
+    </div>
+  </div>
+  <div class="po-modal-actions"><button class="btn btn-outline" onclick="poClose('listing-modal')" style="flex:1">Close</button></div>
 </div></div>
 
 <!-- ══ FULL BACKUP / RESTORE MODAL (opened from Inventory) ══ -->

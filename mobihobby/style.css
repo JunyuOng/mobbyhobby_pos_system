@@ -499,6 +499,31 @@ tr.inv-oos:hover td{opacity:.85}
 .po-toolbar-sum{margin-left:auto;display:flex;gap:14px;align-items:center;font-size:12px;font-weight:600;color:var(--text-3);white-space:nowrap}
 .po-toolbar-sum b{color:var(--text);font-weight:800}
 .po-toolbar-sum .po-sum-due{color:var(--danger)}
+/* Facebook batch listings */
+.list-nextbar{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text-2);margin-bottom:12px}
+.list-nextbar b{font-size:16px;color:var(--blue);font-weight:800}
+.list-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.list-col{min-width:0}
+.list-col-title{font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.list-picker{max-height:44vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.list-pick-row{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;transition:.12s}
+.list-pick-row:hover{border-color:var(--blue);background:var(--blue-ice)}
+.list-add-btn{font-size:11px;font-weight:700;color:var(--blue);white-space:nowrap;flex-shrink:0}
+.list-batch{max-height:44vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+.list-item{display:flex;flex-direction:column;gap:8px;padding:9px 11px;border:1.5px solid var(--border);border-radius:var(--radius-sm)}
+.list-item.current{border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,47,167,.08)}
+.list-item.posted{opacity:.6;background:var(--surface2)}
+.list-item-top{display:flex;align-items:center;gap:9px}
+.list-num{width:26px;height:26px;flex-shrink:0;border-radius:50%;background:var(--blue);color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.list-item-main{flex:1;min-width:0}
+.list-item .prod-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.list-preview{font-size:11px;color:var(--text-3)}
+.list-item-actions{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.list-item-actions .btn{flex:0 0 auto}
+.list-done-tag{font-size:11px;font-weight:700;color:var(--success);white-space:nowrap}
+.list-x{background:var(--danger-bg);color:var(--danger);border:none;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:11px;flex-shrink:0}
+@media(max-width:720px){.list-cols{grid-template-columns:1fr}}
+
 /* watermark preview grid */
 .wm-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;max-height:40vh;overflow-y:auto}
 .wm-grid img{width:100%;border-radius:8px;cursor:pointer;display:block}

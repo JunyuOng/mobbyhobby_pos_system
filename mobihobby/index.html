@@ -2,9 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>MobiHobby POS</title>
 <link rel="stylesheet" href="style.css">
+<!-- ── PWA: installable, home-screen, offline ── -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#002FA7">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MobiHobby">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="icon" type="image/png" href="assets/icon-192.png">
 </head>
 <body>
 
@@ -660,6 +669,13 @@
     const d = document.getElementById('lock-device-id');
     if (d) d.textContent = 'Device: ' + (localStorage.getItem('mh_device_id') || '—');
   });
+  // register the service worker (installable / offline). Relative path so it
+  // works under any GitHub Pages subfolder. Silent no-op on unsupported browsers.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(e => console.warn('[PWA] SW registration failed:', e));
+    });
+  }
 </script>
 </body>
 </html>

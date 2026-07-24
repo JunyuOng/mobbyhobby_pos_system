@@ -497,9 +497,11 @@
 
 <!-- ══ FULL BACKUP / RESTORE MODAL (opened from Inventory) ══ -->
 <div class="po-ovl" id="backup-modal"><div class="po-modal">
-  <h3 class="po-modal-h">Backup &amp; Restore</h3>
-  <div class="po-modal-sub">One file with <b>everything</b>: products &amp; stock, the full sales log, events, pre-orders, reservations and the receipt counter. Keep a copy somewhere safe (send it to yourself on WhatsApp or Google Drive).</div>
-  <button class="btn btn-primary" onclick="downloadFullBackup()" style="width:100%">💾 Download full backup</button>
+  <h3 class="po-modal-h">Sync, Backup &amp; Restore</h3>
+  <div class="po-note" style="margin-bottom:10px">📱 <b>New device or phone app showing no data?</b> Tap below to pull everything from the cloud — no import/export needed.</div>
+  <button class="btn btn-primary" onclick="resyncFromCloud()" style="width:100%;margin-bottom:16px">☁ Re-sync from cloud</button>
+  <div class="po-modal-sub">Or download a file with <b>everything</b> (products &amp; stock, full sales log, events, pre-orders, reservations, counters) — keep a copy somewhere safe (WhatsApp it to yourself or save to Google Drive).</div>
+  <button class="btn btn-outline" onclick="downloadFullBackup()" style="width:100%">💾 Download full backup</button>
   <div class="po-note" style="margin:14px 0 10px">Restoring <b>replaces all data in this browser</b> with the backup's contents, then reloads the app. Use it when moving to a new web address or a new device.</div>
   <div class="import-drop">
     <span class="import-drop-icon">📂</span>

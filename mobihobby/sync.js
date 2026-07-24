@@ -134,6 +134,36 @@ const SyncEngine = {
     }
   },
 
+  // ── FORCE FULL RE-PULL ──
+  // Rebuilds local state from the ENTIRE cloud event log (ignores lastPull and
+  // the device filter). Used by the "Re-sync from cloud" button so a new device
+  // / installed phone app that opened empty can grab everything in one tap.
+  // Returns a result object (surfaces the real error) so the UI can show it.
+  async forcePull() {
+    if (!this._fs || !this.db) {
+      // try to init once if we haven't connected yet
+      try { await this.init(); } catch (e) {}
+      if (!this._fs || !this.db) return { ok: false, error: 'Not connected to the cloud yet — check your internet and try again.' };
+    }
+    try {
+      const { collection, query, orderBy, getDocs } = this._fs;
+      const snap = await getDocs(query(collection(this.db, 'events'), orderBy('timestamp', 'asc')));
+      let n = 0, maxTs = 0;
+      snap.forEach(doc => {
+        const ev = doc.data();
+        this._applyEvent(ev);                 // idempotent upserts — safe to replay all
+        if (ev.timestamp > maxTs) maxTs = ev.timestamp;
+        n++;
+      });
+      this.lastPull = maxTs;
+      localStorage.setItem('mh_last_pull', String(maxTs));
+      window.dispatchEvent(new Event('mh_data_updated'));
+      return { ok: true, events: n };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e) };
+    }
+  },
+
   // ── REALTIME LISTENER ──
   _listenRealtime() {
     if (!this.db) return;

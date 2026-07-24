@@ -1619,6 +1619,21 @@ function closeImportModal() { cancelImport(); poClose('import-modal'); }
 // replaces this browser's data and reloads (it does NOT broadcast to other
 // devices — they keep their own state / the Firebase event log).
 function openBackup() { const m = document.getElementById('backup-msg'); if (m) m.innerHTML = ''; poOpen('backup-modal'); }
+// Pull everything from the cloud into this device (fixes a new device / phone
+// app that opened with no data). Shows the real result/error inline.
+async function resyncFromCloud() {
+  const el = document.getElementById('backup-msg');
+  if (el) el.innerHTML = '<div class="msg msg-ok">☁ Pulling from cloud…</div>';
+  if (!window.SyncEngine) { if (el) el.innerHTML = '<div class="msg msg-err">Sync engine not loaded — check your internet.</div>'; return; }
+  const r = await SyncEngine.forcePull();
+  if (r.ok) {
+    renderInventory(); renderStats();
+    if (el) el.innerHTML = `<div class="msg msg-ok">Loaded from cloud: ${products.length} products, ${sales.length} sales, ${poItems.length} preorders, ${reservations.length} reservations.</div>`;
+    poToast(`Re-synced — ${products.length} products from cloud`);
+  } else {
+    if (el) el.innerHTML = `<div class="msg msg-err">Couldn't reach the cloud: ${_esc(r.error)}</div>`;
+  }
+}
 function downloadFullBackup() {
   const payload = {
     app: 'mobihobby-pos', version: 1, exportedAt: new Date().toISOString(),

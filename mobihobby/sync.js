@@ -164,6 +164,45 @@ const SyncEngine = {
     }
   },
 
+  // ── FORCE FULL PUSH ──
+  // Uploads THIS device's entire current state to the cloud as fresh events, so
+  // a device holding data that never synced (photos/sales added while offline or
+  // while writes were blocked) becomes the source of truth. Append-only + safe:
+  // it only adds events, never deletes. PRODUCT_UPSERTs go last with the highest
+  // timestamps so their absolute stock wins over any replayed SALE deltas.
+  async forcePush() {
+    if (!this._fs || !this.db) {
+      try { await this.init(); } catch (e) {}
+      if (!this._fs || !this.db) return { ok: false, error: 'Not connected to the cloud yet — check your internet and try again.' };
+    }
+    try {
+      const { collection, addDoc, serverTimestamp } = this._fs;
+      let ts = Date.now();
+      const jobs = [];
+      const add = (type, data) => { jobs.push({ type, data, timestamp: ts++ }); };
+      (typeof customers    !== 'undefined' ? customers    : []).forEach(c => add('CUSTOMER_UPSERT', c));
+      (typeof poBatches    !== 'undefined' ? poBatches    : []).forEach(b => add('POBATCH_UPSERT', b));
+      (typeof poItems      !== 'undefined' ? poItems      : []).forEach(i => add('POITEM_UPSERT', i));
+      (typeof reservations !== 'undefined' ? reservations : []).forEach(r => add('RESV_UPSERT', r));
+      (typeof events       !== 'undefined' ? events       : []).forEach(e => add('EVENT_UPSERT', e));
+      (typeof sales        !== 'undefined' ? sales        : []).forEach(s => add('SALE', s));
+      (typeof products     !== 'undefined' ? products     : []).forEach(p => add('PRODUCT_UPSERT', p)); // last: absolute stock wins
+      let done = 0;
+      for (let i = 0; i < jobs.length; i += 12) {
+        await Promise.all(jobs.slice(i, i + 12).map(j =>
+          addDoc(collection(this.db, 'events'), { type: j.type, deviceId: this.deviceId, timestamp: j.timestamp, data: j.data, serverTime: serverTimestamp() })
+        ));
+        done += Math.min(12, jobs.length - i);
+      }
+      // don't re-pull our own just-pushed events
+      this.lastPull = ts;
+      localStorage.setItem('mh_last_pull', String(ts));
+      return { ok: true, pushed: done };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e) };
+    }
+  },
+
   // ── REALTIME LISTENER ──
   _listenRealtime() {
     if (!this.db) return;

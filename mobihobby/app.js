@@ -1714,6 +1714,21 @@ async function resyncFromCloud() {
     if (el) el.innerHTML = `<div class="msg msg-err">Couldn't reach the cloud: ${_esc(r.error)}</div>`;
   }
 }
+// Upload THIS device's data to the cloud (make it the master). Use on the
+// device that has the newest data (e.g. the phone with the latest photos).
+async function pushToCloud() {
+  const el = document.getElementById('backup-msg');
+  const n = products.length + sales.length + poItems.length + reservations.length;
+  if (el) el.innerHTML = `<div class="msg msg-ok">⬆ Uploading ${n} records to the cloud…</div>`;
+  if (!window.SyncEngine) { if (el) el.innerHTML = '<div class="msg msg-err">Sync engine not loaded — check your internet.</div>'; return; }
+  const r = await SyncEngine.forcePush();
+  if (r.ok) {
+    if (el) el.innerHTML = `<div class="msg msg-ok">Uploaded ${r.pushed} records (photos included). Now open the OTHER device and tap “Pull from cloud”.</div>`;
+    poToast(`Uploaded ${r.pushed} records to cloud`);
+  } else {
+    if (el) el.innerHTML = `<div class="msg msg-err">Upload failed: ${_esc(r.error)}</div>`;
+  }
+}
 function downloadFullBackup() {
   const payload = {
     app: 'mobihobby-pos', version: 1, exportedAt: new Date().toISOString(),

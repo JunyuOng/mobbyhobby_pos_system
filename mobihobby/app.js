@@ -25,7 +25,81 @@ window.poBatches = poBatches;
 window.poItems   = poItems;
 window.reservations = reservations;
 
+// ── PERSISTENCE ──
+// Photos are base64 and blow past localStorage's ~5 MB limit, which broke
+// saving AND backup-restore (data silently dropped). We now persist to
+// IndexedDB (gigabytes of room) with localStorage kept only as a migration
+// seed + tiny-scalar fallback. Non-destructive: localStorage is never cleared.
+const IDB_NAME = 'mobihobby_pos', IDB_STORE = 'state', IDB_KEY = 'app';
+let _idb = null, _idbReady = null, _useIdb = false;
+function _idbOpen() {
+  if (_idbReady) return _idbReady;
+  _idbReady = new Promise(resolve => {
+    try {
+      if (!('indexedDB' in window)) return resolve(false);
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(IDB_STORE)) req.result.createObjectStore(IDB_STORE); };
+      req.onsuccess = () => { _idb = req.result; _useIdb = true; resolve(true); };
+      req.onerror = () => resolve(false);
+      req.onblocked = () => resolve(false);
+    } catch (e) { resolve(false); }
+  });
+  return _idbReady;
+}
+function _idbPut(obj) {
+  return new Promise((resolve, reject) => {
+    try {
+      const tx = _idb.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(obj, IDB_KEY);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('aborted'));
+    } catch (e) { reject(e); }
+  });
+}
+function _idbGet() {
+  return new Promise(resolve => {
+    try {
+      const r = _idb.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(IDB_KEY);
+      r.onsuccess = () => resolve(r.result || null);
+      r.onerror = () => resolve(null);
+    } catch (e) { resolve(null); }
+  });
+}
+function _stateObj() {
+  return { p: products, s: sales, ev: events, aev: activeEventId, rc: receiptCounter,
+    cust: customers, pob: poBatches, poi: poItems, resv: reservations, listnum: listingCounter };
+}
+function _applyState(o) {
+  if (!o) return;
+  products = o.p || []; sales = o.s || []; events = o.ev || [];
+  activeEventId = o.aev || ''; receiptCounter = o.rc || 0;
+  customers = o.cust || []; poBatches = o.pob || []; poItems = o.poi || [];
+  reservations = o.resv || []; listingCounter = o.listnum || 0;
+  window.products = products; window.sales = sales; window.events = events;
+  window.customers = customers; window.poBatches = poBatches; window.poItems = poItems;
+  window.reservations = reservations;
+}
+// Load state on boot: prefer IndexedDB; if empty, migrate the localStorage-seeded
+// globals into IndexedDB. Must be awaited before first render + sync init.
+async function loadState() {
+  const ok = await _idbOpen();
+  if (!ok) return;                       // no IndexedDB → stay on localStorage globals
+  const o = await _idbGet();
+  if (o) { _applyState(o); }
+  else { try { await _idbPut(_stateObj()); } catch (e) {} }   // seed from localStorage once
+}
 function _localSave() {
+  if (_useIdb && _idb) {
+    _idbPut(_stateObj()).catch(() => {});   // big data → IndexedDB (fire-and-forget)
+    try {                                   // mirror only tiny scalars to localStorage
+      localStorage.setItem('mhf_aev', activeEventId);
+      localStorage.setItem('mhf_rc', String(receiptCounter));
+      localStorage.setItem('mhf_listnum', String(listingCounter));
+    } catch (e) {}
+    return;
+  }
+  // IndexedDB unavailable → legacy localStorage path (may hit quota with photos)
   try {
     localStorage.setItem('mhf_p',  JSON.stringify(products));
     localStorage.setItem('mhf_s',  JSON.stringify(sales));
@@ -35,9 +109,15 @@ function _localSave() {
     localStorage.setItem('mhf_pob',  JSON.stringify(poBatches));
     localStorage.setItem('mhf_poi',  JSON.stringify(poItems));
     localStorage.setItem('mhf_resv', JSON.stringify(reservations));
-  } catch(e) { if (typeof poToast === 'function') poToast('Storage full — changes may not persist'); }
+  } catch(e) { if (typeof poToast === 'function') poToast('Storage full — too many photos for this browser'); }
 }
 window._localSave = _localSave;
+// Awaitable save — used before a reload so the write is guaranteed on disk.
+async function _localSaveAsync() {
+  if (_useIdb && _idb) { try { await _idbPut(_stateObj()); } catch (e) {} }
+  else _localSave();
+}
+window._localSaveAsync = _localSaveAsync;
 
 function save(syncType, syncData) {
   _localSave();
@@ -1656,15 +1736,15 @@ function handleRestoreFile(input) {
     poConfirm(
       `Restore backup from <b>${_esc((d.exportedAt || '').slice(0, 10) || 'unknown date')}</b>?<br>` +
       `${data.products.length} products · ${data.sales.length} sales · ${(data.poItems || []).length} preorders · ${(data.reservations || []).length} reservations<br>` +
-      `<span style="font-size:12px;color:var(--danger)">This replaces ALL data currently in this browser.</span>`, () => {
+      `<span style="font-size:12px;color:var(--danger)">This replaces ALL data currently in this browser.</span>`, async () => {
       products = data.products || []; sales = data.sales || []; events = data.events || [];
       activeEventId = data.activeEventId || '';
       receiptCounter = parseInt(data.receiptCounter) || 0;
       customers = data.customers || []; poBatches = data.poBatches || []; poItems = data.poItems || [];
       reservations = data.reservations || [];
-      listingCounter = parseInt(data.listingCounter) || 0; _saveListNum();
-      localStorage.setItem('mhf_aev', activeEventId);
-      _localSave();
+      listingCounter = parseInt(data.listingCounter) || 0;
+      _applyState(_stateObj());            // refresh window.* refs
+      await _localSaveAsync();              // guarantee the (large) write lands before reload
       location.reload();   // clean re-init of every view + the sync engine
     });
   };
@@ -2727,7 +2807,8 @@ window.addEventListener('mh_data_updated', () => {
 });
 
 // ── INIT ──
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadState();          // load from IndexedDB (big storage) before first paint
   initTheme();
   applyLogo();
   updateTopbarEvent();

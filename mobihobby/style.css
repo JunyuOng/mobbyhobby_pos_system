@@ -668,3 +668,11 @@ tr.inv-oos:hover td{opacity:.85}
 .po-toast-btn{background:rgba(255,255,255,.18);color:#fff;border:none;border-radius:7px;padding:6px 12px;font-family:'Inter',sans-serif;font-size:12px;font-weight:700;cursor:pointer}
 
 @media(max-width:900px){.po-board{grid-template-columns:1fr}.po-customer-list{max-height:36vh}.po-detail-head{flex-wrap:wrap}.po-detail-actions{margin-left:0;width:100%}}
+
+/* Manager sign-in */
+#manager-auth-overlay { z-index: 4000; }
+#manager-auth-overlay .overlay-box { max-width: 440px; }
+#manager-auth-status { margin: 14px 0; overflow-wrap: anywhere; }
+.manager-device { font-size: 11px; overflow-wrap: anywhere; color: var(--text-3); margin: 12px 0; }
+#manager-auth-overlay button { margin: 5px; }
+[hidden] { display: none !important; }

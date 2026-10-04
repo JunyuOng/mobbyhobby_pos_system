@@ -1,0 +1,13 @@
+{
+  "name": "mobihobby-pos",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/security.test.cjs tests/backend.test.cjs",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-mobihobby \"node --test tests/rules.test.cjs\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.0",
+    "firebase": "^11.0.0",
+    "firebase-tools": "^14.0.0"
+  }
+}

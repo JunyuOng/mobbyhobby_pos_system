@@ -1,0 +1,11 @@
+'use strict';
+const {test,before,after}=require('node:test');
+const fs=require('node:fs');
+const {initializeTestEnvironment,assertSucceeds,assertFails}=require('@firebase/rules-unit-testing');
+const {doc,setDoc,getDoc,deleteDoc,collection,getDocs}=require('firebase/firestore');
+let env;
+before(async()=>{env=await initializeTestEnvironment({projectId:'demo-mobihobby',firestore:{rules:fs.readFileSync('firestore.rules','utf8')}});await env.withSecurityRulesDisabled(async c=>{const db=c.firestore();await Promise.all([setDoc(doc(db,'staff/manager'),{role:'manager',enabled:true}),setDoc(doc(db,'staff/cashier'),{role:'cashier',enabled:true}),setDoc(doc(db,'staff/disabled'),{role:'manager',enabled:false}),setDoc(doc(db,'events/existing'),{type:'SALE'}),setDoc(doc(db,'securityConfig/setup'),{ready:true})]);});});
+after(async()=>env?.cleanup());
+test('only enrolled active staff can read business events',async()=>{for(const uid of ['manager','cashier'])await assertSucceeds(getDocs(collection(env.authenticatedContext(uid).firestore(),'events')));for(const uid of ['stranger','disabled'])await assertFails(getDocs(collection(env.authenticatedContext(uid).firestore(),'events')));await assertFails(getDocs(collection(env.unauthenticatedContext().firestore(),'events')));});
+test('even managers cannot bypass the server gateway',async()=>{for(const uid of ['manager','cashier','stranger']){const db=env.authenticatedContext(uid).firestore();await assertFails(setDoc(doc(db,'events/forged'),{type:'PRODUCT_DELETE'}));await assertFails(setDoc(doc(db,'events/existing'),{type:'SALE'}));await assertFails(deleteDoc(doc(db,'events/existing')));}});
+test('browser cannot self-enrol, change roles or read server catalog',async()=>{const db=env.authenticatedContext('cashier').firestore();await assertSucceeds(getDoc(doc(db,'staff/cashier')));await assertFails(getDoc(doc(db,'staff/manager')));await assertFails(setDoc(doc(db,'staff/cashier'),{role:'manager',enabled:true}));await assertFails(getDoc(doc(db,'securityConfig/setup')));await assertFails(setDoc(doc(db,'securityCatalog/x'),{price:1}));});

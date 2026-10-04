@@ -39,19 +39,23 @@ const SyncEngine = {
 
   // ── INIT ──
   async init() {
+    if (this._initPromise) return this._initPromise;
+    this._initPromise = this._initialize();
+    try { return await this._initPromise; } finally { this._initPromise = null; }
+  },
+
+  async _initialize() {
+    if (this.db && this.auth) { await this._onOnline(); return; }
     try {
       const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
-      const { getFirestore, collection, addDoc, query, where, orderBy, getDocs, onSnapshot, serverTimestamp }
+      const { getFirestore, collection, query, where, orderBy, getDocs, onSnapshot }
         = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
-      const { getAuth, signInAnonymously } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
 
       const app = initializeApp(FIREBASE_CONFIG);
       this.db = getFirestore(app);
-      this.auth = getAuth(app);
-      this._fs = { collection, addDoc, query, where, orderBy, getDocs, onSnapshot, serverTimestamp };
-
-      // sign in anonymously
-      await signInAnonymously(this.auth);
+      this.auth = await window.ManagerAccess.init(app, initializeApp);
+      this._fs = { collection, query, where, orderBy, getDocs, onSnapshot };
+      this._prepareLegacyQueue();
       this.online = true;
       this._updateSyncBadge('synced');
 
@@ -72,39 +76,38 @@ const SyncEngine = {
     }
 
     // watch connectivity
-    window.addEventListener('online', () => this._onOnline());
-    window.addEventListener('offline', () => { this.online = false; this._updateSyncBadge('offline'); });
+    if (!this._watchingConnectivity) {
+      this._watchingConnectivity = true;
+      window.addEventListener('online', () => this.init());
+      window.addEventListener('offline', () => { this.online = false; this._updateSyncBadge('offline'); });
+    }
   },
 
   // ── PUSH EVENT ──
-  async push(type, data) {
+  async push(type, data, managerApproval = false) {
+    if (type !== 'SALE' && !window.ManagerAccess?.isManager()) throw new Error('Manager access required.');
     const event = {
-      type,
-      deviceId: this.deviceId,
-      timestamp: Date.now(),
-      data
+      eventId: this._newEventId(), type, deviceId: this.deviceId, timestamp: Date.now(),
+      data: JSON.parse(JSON.stringify(data)),
+      requiresManager: type !== 'SALE' || managerApproval
     };
-
-    // always save locally first
+    // Persist retry identity and a detached payload BEFORE starting any network request.
+    this._enqueue(event);
     this._applyEvent(event);
+    if (this.online) await this.flushQueue();
+  },
 
-    if (this.online) {
-      try {
-        const { addDoc, collection, serverTimestamp } = this._fs;
-        await addDoc(collection(this.db, 'events'), {
-          ...event,
-          serverTime: serverTimestamp()
-        });
-        this._updateSyncBadge('synced');
-      } catch (e) {
-        console.warn('[Sync] Push failed, queuing:', e.message);
-        this._enqueue(event);
-        this._updateSyncBadge('pending');
+  _newEventId() { return crypto.randomUUID().replace(/-/g, ''); },
+  _prepareLegacyQueue() {
+    let changed = false;
+    for (const event of this.queue) {
+      if (!event.eventId) {
+        event.eventId = this._newEventId();
+        event.requiresManager = true; // Legacy payloads require a manager to review/upload.
+        changed = true;
       }
-    } else {
-      this._enqueue(event);
-      this._updateSyncBadge('pending');
     }
+    if (changed) localStorage.setItem('mh_sync_queue', JSON.stringify(this.queue));
   },
 
   // ── PULL REMOTE EVENTS ──
@@ -130,7 +133,8 @@ const SyncEngine = {
       localStorage.setItem('mh_last_pull', String(maxTs));
       if (!snap.empty) window.dispatchEvent(new Event('mh_data_updated'));
     } catch (e) {
-      console.warn('[Sync] Pull failed:', e.message);
+      this.lastError = e.message;
+      this._updateSyncBadge('blocked');
     }
   },
 
@@ -140,6 +144,7 @@ const SyncEngine = {
   // / installed phone app that opened empty can grab everything in one tap.
   // Returns a result object (surfaces the real error) so the UI can show it.
   async forcePull() {
+    if (!window.ManagerAccess?.isManager()) return { ok: false, error: 'Manager sign-in required.' };
     if (!this._fs || !this.db) {
       // try to init once if we haven't connected yet
       try { await this.init(); } catch (e) {}
@@ -171,36 +176,31 @@ const SyncEngine = {
   // it only adds events, never deletes. PRODUCT_UPSERTs go last with the highest
   // timestamps so their absolute stock wins over any replayed SALE deltas.
   async forcePush() {
-    if (!this._fs || !this.db) {
-      try { await this.init(); } catch (e) {}
-      if (!this._fs || !this.db) return { ok: false, error: 'Not connected to the cloud yet — check your internet and try again.' };
-    }
+    if (!window.ManagerAccess?.isManager()) return { ok: false, error: 'Manager sign-in required.' };
+    if (!this.auth) await this.init();
     try {
-      const { collection, addDoc, serverTimestamp } = this._fs;
-      let ts = Date.now();
       const jobs = [];
-      const add = (type, data) => { jobs.push({ type, data, timestamp: ts++ }); };
-      (typeof customers    !== 'undefined' ? customers    : []).forEach(c => add('CUSTOMER_UPSERT', c));
-      (typeof poBatches    !== 'undefined' ? poBatches    : []).forEach(b => add('POBATCH_UPSERT', b));
-      (typeof poItems      !== 'undefined' ? poItems      : []).forEach(i => add('POITEM_UPSERT', i));
-      (typeof reservations !== 'undefined' ? reservations : []).forEach(r => add('RESV_UPSERT', r));
-      (typeof events       !== 'undefined' ? events       : []).forEach(e => add('EVENT_UPSERT', e));
-      (typeof sales        !== 'undefined' ? sales        : []).forEach(s => add('SALE', s));
-      (typeof products     !== 'undefined' ? products     : []).forEach(p => add('PRODUCT_UPSERT', p)); // last: absolute stock wins
-      let done = 0;
-      for (let i = 0; i < jobs.length; i += 12) {
-        await Promise.all(jobs.slice(i, i + 12).map(j =>
-          addDoc(collection(this.db, 'events'), { type: j.type, deviceId: this.deviceId, timestamp: j.timestamp, data: j.data, serverTime: serverTimestamp() })
-        ));
-        done += Math.min(12, jobs.length - i);
+      let ts = Date.now();
+      const add = (type, data) => jobs.push({ eventId: this._newEventId(), type,
+        deviceId: this.deviceId, timestamp: ts++, requiresManager: true,
+        data: JSON.parse(JSON.stringify(data)) });
+      customers.forEach(c => add('CUSTOMER_UPSERT', c));
+      poBatches.forEach(b => add('POBATCH_UPSERT', b));
+      poItems.forEach(i => add('POITEM_UPSERT', i));
+      reservations.forEach(r => add('RESV_UPSERT', r));
+      events.forEach(e => add('EVENT_UPSERT', e));
+      sales.forEach(s => add('SALE', s));
+      products.forEach(p => add('PRODUCT_UPSERT', p));
+      // Keep failed uploads recoverable. Never advance the remote pull cursor here.
+      const next = this.queue.concat(jobs);
+      localStorage.setItem('mh_sync_queue', JSON.stringify(next));
+      this.queue = next;
+      await this.flushQueue();
+      if (jobs.some(j => this.queue.some(q => q.eventId === j.eventId))) {
+        return { ok: false, error: this.lastError || 'Upload is pending. Keep this device’s data.' };
       }
-      // don't re-pull our own just-pushed events
-      this.lastPull = ts;
-      localStorage.setItem('mh_last_pull', String(ts));
-      return { ok: true, pushed: done };
-    } catch (e) {
-      return { ok: false, error: e.message || String(e) };
-    }
+      return { ok: true, pushed: jobs.length };
+    } catch (error) { return { ok: false, error: error.message }; }
   },
 
   // ── REALTIME LISTENER ──
@@ -212,7 +212,8 @@ const SyncEngine = {
       where('timestamp', '>', Date.now()),
       orderBy('timestamp', 'asc')
     );
-    onSnapshot(q, snap => {
+    if (this._unsubscribe) this._unsubscribe();
+    this._unsubscribe = onSnapshot(q, snap => {
       snap.docChanges().forEach(change => {
         if (change.type === 'added') {
           const ev = change.doc.data();
@@ -222,7 +223,7 @@ const SyncEngine = {
           }
         }
       });
-    }, e => console.warn('[Sync] Realtime listener error:', e.message));
+    }, e => { this.lastError = e.message; this._updateSyncBadge('blocked'); });
   },
 
   // ── APPLY EVENT TO LOCAL STATE ──
@@ -299,47 +300,64 @@ const SyncEngine = {
 
   // ── QUEUE MANAGEMENT ──
   _enqueue(event) {
-    this.queue.push(event);
-    localStorage.setItem('mh_sync_queue', JSON.stringify(this.queue));
+    const next = this.queue.concat([event]);
+    localStorage.setItem('mh_sync_queue', JSON.stringify(next));
+    this.queue = next;
+    this._updateSyncBadge('pending');
   },
 
   async flushQueue() {
-    if (!this.online || !this.queue.length) return;
-    const { addDoc, collection, serverTimestamp } = this._fs;
-    const remaining = [];
-    for (const event of this.queue) {
-      try {
-        await addDoc(collection(this.db, 'events'), { ...event, serverTime: serverTimestamp() });
-      } catch (e) {
-        remaining.push(event);
+    if (!this.online || !this.auth) return;
+    if (this._flushing) return this._flushing;
+    this._prepareLegacyQueue();
+    this._flushing = (async () => {
+      this.lastError = '';
+      while (this.online && this.queue.length) {
+        const event = this.queue[0];
+        try {
+          await window.ManagerAccess.send(event);
+          // Remove ONLY the acknowledged event; changes queued during the await remain.
+          const next = this.queue.filter(e => e.eventId !== event.eventId);
+          localStorage.setItem('mh_sync_queue', JSON.stringify(next));
+          this.queue = next;
+        } catch (error) {
+          this.lastError = error.message || 'Upload failed';
+          this._updateSyncBadge('blocked');
+          return;
+        }
       }
-    }
-    this.queue = remaining;
-    localStorage.setItem('mh_sync_queue', JSON.stringify(this.queue));
-    if (!remaining.length) this._updateSyncBadge('synced');
+      this._updateSyncBadge(this.queue.length ? 'pending' : 'synced');
+    })();
+    try { await this._flushing; } finally { this._flushing = null; }
   },
 
   async _onOnline() {
+    if (!this.auth || !this.db || !this._fs) return;
     this.online = true;
     this._updateSyncBadge('syncing');
     await this.flushQueue();
     await this.pull();
-    this._updateSyncBadge(this.queue.length ? 'pending' : 'synced');
+    this._listenRealtime();
+    this._updateSyncBadge(this.lastError ? 'blocked' : this.queue.length ? 'pending' : 'synced');
   },
 
   // ── SYNC BADGE UI ──
   _updateSyncBadge(state) {
-    const el = document.getElementById('sync-badge');
-    if (!el) return;
+
     const map = {
+      blocked: { text: '⚠ Sync needs attention', color: '#dc2626' },
       synced:  { text: '☁ Synced',   color: '#16a34a' },
       pending: { text: '⏳ Pending',  color: '#d97706' },
       syncing: { text: '↻ Syncing',  color: '#002FA7' },
       offline: { text: '⚡ Offline',  color: '#6b7280' }
     };
     const s = map[state] || map.offline;
-    el.textContent = s.text;
-    el.style.color = s.color;
+    for (const id of ['sync-badge', 'cashier-sync-badge']) {
+      const el = document.getElementById(id); if (!el) continue;
+      el.textContent = s.text;
+      el.title = this.lastError || (this.queue.length ? this.queue.length + ' pending change(s)' : '');
+      el.style.color = s.color;
+    }
   }
 };
 

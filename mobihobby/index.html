@@ -22,6 +22,7 @@
   <div class="lock-logo"><img class="mh-logo-full" data-mh-logo alt="MobiHobby"></div>
   <div class="lock-tagline">Diecast &amp; hobby collectibles</div>
   <div class="lock-device" id="lock-device-id"></div>
+  <div class="lock-device" id="cashier-sync-badge">Connecting…</div>
   <div class="lock-sell-area">
     <div class="lock-event" id="lock-event-name">No event selected</div>
     <div class="lock-scan-label">Scan barcode or search by name</div>
@@ -72,7 +73,7 @@
   </div>
   <div class="lock-btn-row">
     <button class="lock-mgr-btn" onclick="openCashierSold()">📋 Sold items</button>
-    <button class="lock-mgr-btn" onclick="requirePin(()=>exitCashierMode())">🔐 Manager mode</button>
+    <button class="lock-mgr-btn" onclick="requireManager(()=>exitCashierMode())">🔐 Manager mode</button>
   </div>
 </div>
 
@@ -89,7 +90,7 @@
 </div>
 
 <!-- ── MAIN APP ── -->
-<div class="layout" id="main-app">
+<div class="layout" id="main-app" style="display:none">
   <aside class="sidebar">
     <div class="sidebar-logo">
       <div class="brand"><img class="mh-logo-full" data-mh-logo alt="MobiHobby"></div>
@@ -224,7 +225,7 @@
               <input class="bulk-mini-input" id="bulk-stock" placeholder="Set stock" type="number" min="0" inputmode="numeric">
               <button class="btn btn-ghost btn-sm" onclick="applyBulkEdit()">✓ Apply</button>
             </div>
-            <button class="btn btn-danger btn-sm" onclick="requirePin(()=>bulkDelete())">✕ Delete</button>
+            <button class="btn btn-danger btn-sm" onclick="requireManager(()=>bulkDelete())">✕ Delete</button>
           </div>
           <div style="overflow-x:auto">
             <table class="inv-table">
@@ -264,7 +265,7 @@
             <select id="hist-platform-filter" onchange="renderHistory();renderHistStats()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-pill);font-family:'Inter',sans-serif;font-size:13px;color:var(--text);background:var(--surface);appearance:none;flex:1">
               <option value="">All platforms</option>
             </select>
-            <button class="btn btn-danger btn-sm" onclick="requirePin(()=>clearHistory())">🗑 Clear</button>
+            <button class="btn btn-danger btn-sm" onclick="requireManager(()=>clearHistory())">🗑 Clear</button>
           </div>
           <div class="card">
             <div id="hist-body"></div>
@@ -339,24 +340,15 @@
   </div><!-- /main -->
 </div><!-- /layout -->
 
-<!-- PIN overlay -->
-<div class="overlay-bg" id="pin-overlay">
-  <div class="overlay-box">
-    <div class="overlay-title" id="pin-title">Enter PIN</div>
-    <div class="overlay-sub"   id="pin-sub">Enter your 4-digit PIN</div>
-    <div class="pin-dots" id="pin-dots">
-      <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
-      <div class="pin-dot" id="pd2"></div><div class="pin-dot" id="pd3"></div>
-    </div>
-    <div id="pin-err" style="text-align:center;font-size:13px;color:var(--danger);min-height:20px;margin-bottom:8px"></div>
-    <div class="pin-pad">
-      <button class="pin-key" onclick="pinPress('1')">1</button><button class="pin-key" onclick="pinPress('2')">2</button><button class="pin-key" onclick="pinPress('3')">3</button>
-      <button class="pin-key" onclick="pinPress('4')">4</button><button class="pin-key" onclick="pinPress('5')">5</button><button class="pin-key" onclick="pinPress('6')">6</button>
-      <button class="pin-key" onclick="pinPress('7')">7</button><button class="pin-key" onclick="pinPress('8')">8</button><button class="pin-key" onclick="pinPress('9')">9</button>
-      <button class="pin-key" onclick="cancelPin()" style="font-size:13px;color:var(--text-2)">Cancel</button>
-      <button class="pin-key" onclick="pinPress('0')">0</button>
-      <button class="pin-key del" onclick="pinBackspace()">⌫</button>
-    </div>
+<!-- Manager identity stays in memory; no PIN/password is stored by the app. -->
+<div class="overlay-bg" id="manager-auth-overlay">
+  <div class="overlay-box" role="dialog" aria-modal="true" aria-labelledby="manager-auth-title">
+    <div class="overlay-title" id="manager-auth-title">Manager sign-in</div>
+    <p id="manager-auth-status" role="status">Sign in with your approved Google account.</p>
+    <p class="manager-device">Cashier device UID: <code id="manager-device-uid"></code></p>
+    <button class="btn btn-primary" id="manager-sign-in-btn" onclick="ManagerAccess.signIn()">Sign in with Google</button>
+    <button class="btn btn-warning" id="manager-setup-btn" hidden onclick="ManagerAccess.finishSetup()">Finish initial security setup</button>
+    <button class="btn btn-outline" onclick="ManagerAccess.cancel()">Cancel</button>
   </div>
 </div>
 
@@ -579,7 +571,7 @@
   </div>
   <div id="save-msg"></div>
   <div class="po-modal-actions">
-    <button class="btn btn-danger" id="delete-btn" style="display:none" onclick="requirePin(()=>deleteFromForm())">✕ Delete</button>
+    <button class="btn btn-danger" id="delete-btn" style="display:none" onclick="requireManager(()=>deleteFromForm())">✕ Delete</button>
     <button class="btn btn-outline" onclick="closeProductModal()">Cancel</button>
     <button class="btn btn-primary" onclick="saveProduct()">✓ Save</button>
   </div>
@@ -684,6 +676,7 @@
 
 <div class="po-toast" id="po-toast"><span id="po-toast-msg"></span><button class="po-toast-btn" id="po-toast-undo">↶ Undo</button></div>
 
+<script src="auth.js"></script>
 <script src="sync.js"></script>
 <script src="app.js"></script>
 <script>

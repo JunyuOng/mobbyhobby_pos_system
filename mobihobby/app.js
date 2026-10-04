@@ -119,10 +119,13 @@ async function _localSaveAsync() {
 }
 window._localSaveAsync = _localSaveAsync;
 
-function save(syncType, syncData) {
+function save(syncType, syncData, managerApproval = false) {
   _localSave();
   if (syncType && window.SyncEngine) {
-    window.SyncEngine.push(syncType, syncData).catch(() => {});
+    window.SyncEngine.push(syncType, syncData, managerApproval).catch(error => {
+      console.error('[Sync] Save pending:', error);
+      poToast('Cloud save pending — ' + error.message);
+    });
   }
 }
 
@@ -274,40 +277,12 @@ function saleView(s) {
   return { salesType: 'Physical', event: s.eventName || s.event || WALK_IN, platform: 'None' };
 }
 
-// ── PIN ──
-let pinVal = '', pinCallback = null, pinMode = 'check', pinFirstEntry = '';
-// PIN is fixed across all devices — change here when cloud PIN sync is ready
-const MANAGER_PIN = '0858';
-function getStoredPin() { return MANAGER_PIN; }
-
-// openSetPin removed — PIN is fixed at MANAGER_PIN
-function requirePin(cb) {
-  pinCallback = cb;
-  _openPinDialog('check', 'Enter Manager PIN', 'Enter PIN to continue');
+// ── MANAGER AUTHORIZATION ──
+function requireManager(action) { window.ManagerAccess.require(action); }
+function managerGuard(action) {
+  if (window.ManagerAccess?.isManager()) return true;
+  requireManager(action); return false;
 }
-function _openPinDialog(mode, title, sub) {
-  pinMode = mode; pinVal = '';
-  document.getElementById('pin-title').textContent = title;
-  document.getElementById('pin-sub').textContent = sub;
-  document.getElementById('pin-err').textContent = '';
-  updatePinDots();
-  document.getElementById('pin-overlay').classList.add('open');
-}
-function pinPress(d) { if (pinVal.length >= 4) return; pinVal += d; updatePinDots(); if (pinVal.length === 4) setTimeout(submitPin, 120); }
-function pinBackspace() { pinVal = pinVal.slice(0,-1); updatePinDots(); }
-function updatePinDots() { for(let i=0;i<4;i++) { const d=document.getElementById('pd'+i); if(d) d.classList.toggle('filled', i<pinVal.length); } }
-function submitPin() {
-  // only 'check' mode active — set1/set2 removed (PIN is fixed)
-  if (pinVal === getStoredPin()) {
-    document.getElementById('pin-overlay').classList.remove('open');
-    const cb = pinCallback; pinCallback = null; pinVal = '';
-    if (cb) cb();
-  } else {
-    document.getElementById('pin-err').textContent = 'Wrong PIN';
-    pinVal = ''; updatePinDots(); beepErr();
-  }
-}
-function cancelPin() { document.getElementById('pin-overlay').classList.remove('open'); pinVal=''; pinCallback=null; pinMode='check'; }
 
 // ── CASHIER MODE ──
 let _inCashierMode = false;
@@ -319,12 +294,12 @@ function enterCashierMode() {
   updateTopbarEvent();
   setSaleType(true, poDefaultSaleType());
   lockRenderCart();
-  // reset stale PIN state so manager button always works fresh
-  pinVal = ''; pinCallback = null; pinMode = 'check';
+  window.ManagerAccess?.lock();
   setTimeout(() => { const i = document.getElementById('lock-scan-input'); if(i) i.focus(); }, 200);
 }
 
 function exitCashierMode() {
+  if (!managerGuard(() => exitCashierMode())) return;
   _inCashierMode = false;
   document.getElementById('cashier-lock').classList.remove('show');
   document.getElementById('main-app').style.display = 'flex';
@@ -398,6 +373,7 @@ function openEventsModal() { renderEventList(); poOpen('events-modal'); }
 // against `document` first, where createEvent is a native (deprecated) method,
 // so onclick="createEvent()" would call document.createEvent() and throw.
 function createNewEvent() {
+  if (!managerGuard(() => createNewEvent())) return;
   const nameEl = document.getElementById('ev-name');
   const dateEl = document.getElementById('ev-date');
   const locEl  = document.getElementById('ev-loc');
@@ -418,9 +394,11 @@ function createNewEvent() {
   showMsg('ev-msg', 'Event created and set as active', 'ok');
   renderEventList();
 }
-function setActiveEvent(id) { activeEventId = id; saveActiveEvent(); updateTopbarEvent(); applyDefaultSaleType(); renderEventList(); }
+function setActiveEvent(id) {
+  if (!managerGuard(() => setActiveEvent(id))) return; activeEventId = id; saveActiveEvent(); updateTopbarEvent(); applyDefaultSaleType(); renderEventList(); }
 function deleteEvent(id) {
-  requirePin(() => {
+  if (!managerGuard(() => deleteEvent(id))) return;
+  requireManager(() => {
     if (!confirm('Delete this event? Sales stay in history.')) return;
     events = events.filter(e => e.id !== id);
     if (activeEventId === id) { activeEventId = ''; saveActiveEvent(); updateTopbarEvent(); }
@@ -437,11 +415,11 @@ function renderEventList() {
     const evTotal = evSales.reduce((a,s) => a + parseFloat(s.total), 0);
     return `<div class="event-card ${isActive ? 'active-event' : ''}">
       <div class="event-card-info">
-        <div class="event-card-name">${isActive ? '✅ ' : ''} ${ev.name}</div>
-        <div class="event-card-meta">${ev.date||'No date'}${ev.loc?' · '+ev.loc:''} · ${evSales.length} sales · RM ${evTotal.toFixed(2)}</div>
+        <div class="event-card-name">${isActive ? '✅ ' : ''} ${_esc(ev.name)}</div>
+        <div class="event-card-meta">${_esc(ev.date||'No date')}${_esc(ev.loc?' · '+ev.loc:'')} · ${evSales.length} sales · RM ${evTotal.toFixed(2)}</div>
       </div>
-      ${!isActive ? `<button class="btn btn-ghost btn-sm" onclick="setActiveEvent('${ev.id}')">Set active</button>` : '<span style="font-size:11px;color:var(--blue);font-weight:600">Active</span>'}
-      <button class="btn btn-danger btn-sm" onclick="deleteEvent('${ev.id}')">✕</button>
+      ${!isActive ? `<button class="btn btn-ghost btn-sm" onclick="setActiveEvent(${_js(ev.id)})">Set active</button>` : '<span style="font-size:11px;color:var(--blue);font-weight:600">Active</span>'}
+      <button class="btn btn-danger btn-sm" onclick="deleteEvent(${_js(ev.id)})">✕</button>
     </div>`;
   }).join('');
 }
@@ -510,9 +488,9 @@ function sellSuggestInput(isLock) {
 function _showSuggest(list, isLock) {
   const el = document.getElementById(isLock ? 'lock-suggest' : 'sell-suggest'); if (!el) return;
   el.innerHTML = list.map(p => `
-    <div class="suggest-row" onclick="pickSuggest('${p.barcode}',${isLock})">
-      ${p.img ? `<img class="ls-img" src="${p.img}" alt="">` : '<div class="ls-ph">🚗</div>'}
-      <div style="flex:1;min-width:0"><div class="suggest-name">${p.name}</div><div class="suggest-sub">${p.brand} · ${p.scale} · RM ${p.price.toFixed(2)}</div></div>
+    <div class="suggest-row" onclick="pickSuggest(${_js(p.barcode)},${isLock})">
+      ${p.img ? `<img class="ls-img" src="${_esc(_imageSrc(p.img))}" alt="">` : '<div class="ls-ph">🚗</div>'}
+      <div style="flex:1;min-width:0"><div class="suggest-name">${_esc(p.name)}</div><div class="suggest-sub">${_esc(p.brand)} · ${_esc(p.scale)} · RM ${p.price.toFixed(2)}</div></div>
       <span class="suggest-stock ${p.stock > 0 ? '' : 'out'}">${p.stock > 0 ? p.stock + ' in stock' : 'Sold out'}</span>
     </div>`).join('');
   el.classList.add('show');
@@ -551,7 +529,7 @@ function showLastScan(p, qty) {
   document.getElementById('ls-name').textContent = p.name;
   document.getElementById('ls-sub').textContent = p.brand + ' · RM ' + p.price.toFixed(2);
   document.getElementById('ls-badge').textContent = '×' + qty;
-  document.getElementById('ls-img-wrap').innerHTML = p.img ? `<img class="ls-img" src="${p.img}" alt="">` : `<div class="ls-ph">🚗</div>`;
+  document.getElementById('ls-img-wrap').innerHTML = p.img ? `<img class="ls-img" src="${_esc(_imageSrc(p.img))}" alt="">` : `<div class="ls-ph">🚗</div>`;
   document.getElementById('last-scan').classList.add('show');
   lastScanTimer = setTimeout(() => document.getElementById('last-scan').classList.remove('show'), 2500);
 }
@@ -562,7 +540,7 @@ function lockShowLastScan(p, qty) {
   document.getElementById('lock-ls-name').textContent = p.name;
   document.getElementById('lock-ls-sub').textContent = p.brand + ' · RM ' + p.price.toFixed(2);
   document.getElementById('lock-ls-badge').textContent = '×' + qty;
-  document.getElementById('lock-ls-img').innerHTML = p.img ? `<img class="lock-ls-img" src="${p.img}" alt="">` : `<div class="lock-ls-ph">🚗</div>`;
+  document.getElementById('lock-ls-img').innerHTML = p.img ? `<img class="lock-ls-img" src="${_esc(_imageSrc(p.img))}" alt="">` : `<div class="lock-ls-ph">🚗</div>`;
   document.getElementById('lock-last-scan').classList.add('show');
   lockLastScanTimer = setTimeout(() => document.getElementById('lock-last-scan').classList.remove('show'), 2500);
 }
@@ -582,23 +560,23 @@ function renderSellCart() {
     const dp = c.discPrice !== undefined ? c.discPrice : c.price;
     const hasDisc = c.discPrice !== undefined && c.discPrice !== c.price;
     return `<div class="cart-row">
-      ${c.img ? `<img class="cart-thumb" src="${c.img}" alt="">` : `<div class="cart-ph">🚗</div>`}
+      ${c.img ? `<img class="cart-thumb" src="${_esc(_imageSrc(c.img))}" alt="">` : `<div class="cart-ph">🚗</div>`}
       <div class="cart-info">
-        <div class="cart-name">${c.name}</div>
-        <div class="cart-sub">${c.brand} · ${c.scale}</div>
+        <div class="cart-name">${_esc(c.name)}</div>
+        <div class="cart-sub">${_esc(c.brand)} · ${_esc(c.scale)}</div>
         <div class="cart-price-row">
           ${hasDisc ? `<span class="cart-orig-price">RM ${c.price.toFixed(2)}</span>` : ''}
           <span class="cart-final-price">RM ${dp.toFixed(2)}</span>
           <input class="item-disc-input" type="number" placeholder="Override RM" value="${hasDisc?dp:''}" min="0" step="0.01" inputmode="decimal"
-            onchange="setItemDisc('${c.barcode}',this.value)" title="Override price for this item">
+            onchange="setItemDisc(${_js(c.barcode)},this.value)" title="Override price for this item">
         </div>
       </div>
       <div class="stepper">
-        <button class="stepper-btn" onclick="sellQty('${c.barcode}',-1)">−</button>
-        <span class="stepper-qty">${c.qty}</span>
-        <button class="stepper-btn" onclick="sellQty('${c.barcode}',1)">+</button>
+        <button class="stepper-btn" onclick="sellQty(${_js(c.barcode)},-1)">−</button>
+        <span class="stepper-qty">${_esc(c.qty)}</span>
+        <button class="stepper-btn" onclick="sellQty(${_js(c.barcode)},1)">+</button>
       </div>
-      <button class="remove-btn" onclick="removeSellItem('${c.barcode}')">✕</button>
+      <button class="remove-btn" onclick="removeSellItem(${_js(c.barcode)})">✕</button>
     </div>`;
   }).join('');
   renderCartTotals();
@@ -631,18 +609,18 @@ function lockRenderCart() {
   btn.disabled = false;
   list.innerHTML = sellCart.map(c => `
     <div class="lock-cart-row">
-      ${c.img ? `<img class="lock-cart-img" src="${c.img}" alt="">` : `<div class="lock-cart-ph">🚗</div>`}
+      ${c.img ? `<img class="lock-cart-img" src="${_esc(_imageSrc(c.img))}" alt="">` : `<div class="lock-cart-ph">🚗</div>`}
       <div style="flex:1;min-width:0">
-        <div class="lock-cart-name">${c.name}</div>
-        <div class="lock-cart-sub">${c.brand} · RM ${(c.discPrice!==undefined?c.discPrice:c.price).toFixed(2)}</div>
+        <div class="lock-cart-name">${_esc(c.name)}</div>
+        <div class="lock-cart-sub">${_esc(c.brand)} · RM ${(c.discPrice!==undefined?c.discPrice:c.price).toFixed(2)}</div>
       </div>
       <div class="lock-stepper">
-        <button class="lock-stepper-btn" onclick="lockQty('${c.barcode}',-1)">−</button>
-        <span class="lock-stepper-qty">${c.qty}</span>
-        <button class="lock-stepper-btn" onclick="lockQty('${c.barcode}',1)">+</button>
+        <button class="lock-stepper-btn" onclick="lockQty(${_js(c.barcode)},-1)">−</button>
+        <span class="lock-stepper-qty">${_esc(c.qty)}</span>
+        <button class="lock-stepper-btn" onclick="lockQty(${_js(c.barcode)},1)">+</button>
       </div>
       <div class="lock-cart-price">RM ${((c.discPrice!==undefined?c.discPrice:c.price)*c.qty).toFixed(2)}</div>
-      <button class="lock-remove-btn" onclick="lockRemove('${c.barcode}')">✕</button>
+      <button class="lock-remove-btn" onclick="lockRemove(${_js(c.barcode)})">✕</button>
     </div>`).join('');
   lockRenderTotals();
 }
@@ -735,7 +713,8 @@ function _resolveSaleContext(isLock) {
   const customer = document.getElementById(isLock ? 'lock-customer' : 'customer-name').value.trim();
   return {
     isLock, sub, disc, customer, salesType, platform, eventId, eventLabel,
-    needsApproval: val > 0 && _discNeedsApproval(sub, val, dtype)
+    cartSnapshot: JSON.stringify(sellCart),
+    needsApproval: sellCart.reduce((sum, c) => sum + c.price * c.qty, 0) * 0.8 > sub - disc + 0.000001
   };
 }
 
@@ -745,7 +724,7 @@ function _openConfirmWith(ctx) {
     _buildConfirm(ctx.sub, ctx.disc);
     document.getElementById('confirm-overlay').classList.add('open');
   };
-  if (ctx.needsApproval) { requirePin(go); return; }
+  if (ctx.needsApproval) { requireManager(go); return; }
   go();
 }
 
@@ -767,9 +746,9 @@ function _buildConfirm(sub, disc) {
     const dp = c.discPrice !== undefined ? c.discPrice : c.price;
     const hasDisc = c.discPrice !== undefined && c.discPrice !== c.price;
     return `<div class="confirm-item">
-      <div><div class="confirm-item-name">${c.name}</div>
-      <div class="confirm-item-sub">${c.brand} · ${c.scale}${hasDisc ? ` · was RM ${c.price.toFixed(2)}` : ''}</div></div>
-      <div class="confirm-item-price">×${c.qty} = RM ${(dp*c.qty).toFixed(2)}</div>
+      <div><div class="confirm-item-name">${_esc(c.name)}</div>
+      <div class="confirm-item-sub">${_esc(c.brand)} · ${_esc(c.scale)}${hasDisc ? ` · was RM ${c.price.toFixed(2)}` : ''}</div></div>
+      <div class="confirm-item-price">×${_esc(c.qty)} = RM ${(dp*c.qty).toFixed(2)}</div>
     </div>`;
   }).join('');
   const dr = document.getElementById('confirm-discount-row');
@@ -784,7 +763,7 @@ function _buildConfirm(sub, disc) {
     const isOnline = ctx.salesType === 'Online';
     cc.innerHTML = `<div class="confirm-ctx">
       <span class="confirm-ctx-chip">${isOnline ? '🌐 Online' : '🏬 Physical'}</span>
-      <span class="confirm-ctx-chip muted">${isOnline ? '📱 ' + (ctx.platform || '—') : '📅 ' + (ctx.eventLabel || 'No event')}</span>
+      <span class="confirm-ctx-chip muted">${_esc(isOnline ? '📱 ' + (ctx.platform || '—') : '📅 ' + (ctx.eventLabel || 'No event'))}</span>
     </div>`;
   }
 }
@@ -794,7 +773,18 @@ function closeConfirm() { document.getElementById('confirm-overlay').classList.r
 function completeSell() {
   closeConfirm();
   if (!_pendingSaleCtx) return; // safety guard
-  const { isLock, sub, disc, customer, salesType, platform, eventId, eventLabel } = _pendingSaleCtx;
+  const reviewed = _pendingSaleCtx;
+  const current = _resolveSaleContext(reviewed.isLock);
+  if (!current) { _pendingSaleCtx = null; return; }
+  if (JSON.stringify(current) !== JSON.stringify(reviewed)) {
+    _pendingSaleCtx = null;
+    _sellMsg(reviewed.isLock, 'Sale details changed. Review and confirm again.', 'err');
+    return;
+  }
+  if (current.needsApproval && !window.ManagerAccess?.isManager()) {
+    requireManager(() => _openConfirmWith(current)); return;
+  }
+  const { isLock, sub, disc, customer, salesType, platform, eventId, eventLabel } = current;
   _pendingSaleCtx = null;
   const total = Math.max(0, sub - disc);
 
@@ -830,7 +820,7 @@ function completeSell() {
   };
 
   sales.unshift(rec);
-  save('SALE', rec);
+  save('SALE', rec, current.needsApproval);
 
   // clear inputs + reset sale type to Physical for the next sale
   if (isLock) {
@@ -857,23 +847,23 @@ function showReceipt(rec) {
   currentReceipt = rec;
   document.getElementById('r-meta').textContent = `Receipt #${rec.receiptNo} · ${rec.date}`;
   const rv = saleView(rec);
-  document.getElementById('r-event-tag').innerHTML = `<div class="r-event">${rv.salesType === 'Online' ? '🌐' : '📅'} ${rv.event}</div>`;
+  document.getElementById('r-event-tag').innerHTML = `<div class="r-event">${rv.salesType === 'Online' ? '🌐' : '📅'} ${_esc(rv.event)}</div>`;
   document.getElementById('r-channel-tag').innerHTML = rv.salesType === 'Online'
-    ? `<div class="r-channel">📱 ${rv.platform}</div>`
+    ? `<div class="r-channel">📱 ${_esc(rv.platform)}</div>`
     : `<div class="r-channel">🏬 Physical</div>`;
-  document.getElementById('r-customer').innerHTML = rec.customer ? `<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#000">👤 ${rec.customer}</div>` : '';
+  document.getElementById('r-customer').innerHTML = rec.customer ? `<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#000">👤 ${_esc(rec.customer)}</div>` : '';
   document.getElementById('r-items').innerHTML = rec.arr.map(c => {
     const dp = c.discPrice !== undefined ? c.discPrice : c.price;
     const hasDisc = c.discPrice !== undefined && c.discPrice !== c.price;
     return `<div class="r-item">
-      <div class="r-item-name">${c.name}<div class="r-item-sub">${c.brand} · ${c.scale} · ×${c.qty}${hasDisc?' · was RM '+c.price.toFixed(2):''}</div></div>
+      <div class="r-item-name">${_esc(c.name)}<div class="r-item-sub">${_esc(c.brand)} · ${_esc(c.scale)} · ×${_esc(c.qty)}${hasDisc?' · was RM '+c.price.toFixed(2):''}</div></div>
       <div class="r-item-price">RM ${(dp*c.qty).toFixed(2)}</div>
     </div>`;
   }).join('');
   const dr = document.getElementById('r-discount-row');
   dr.innerHTML = parseFloat(rec.discount) > 0 ? `
-    <div class="r-row"><span style="color:#555">Subtotal</span><span>RM ${rec.subtotal}</span></div>
-    <div class="r-row"><span style="color:#16a34a">Discount</span><span style="color:#16a34a">−RM ${rec.discount}</span></div>` : '';
+    <div class="r-row"><span style="color:#555">Subtotal</span><span>RM ${_esc(rec.subtotal)}</span></div>
+    <div class="r-row"><span style="color:#16a34a">Discount</span><span style="color:#16a34a">−RM ${_esc(rec.discount)}</span></div>` : '';
   document.getElementById('r-total').textContent = rec.total;
   document.getElementById('receipt-overlay').classList.add('open');
 }
@@ -976,10 +966,10 @@ function renderStats() {
   const cost = list.reduce((a,p) => a+(p.cost||0)*p.stock, 0);
   const profit = tw - cost;
   document.getElementById('stats').innerHTML = `
-    <div class="stat-card accent"><div class="stat-label">Products${suffix}</div><div class="stat-value">${list.length}</div></div>
-    <div class="stat-card"><div class="stat-label">Total units${suffix}</div><div class="stat-value">${ts}</div></div>
-    <div class="stat-card"><div class="stat-label">Inventory value${suffix}</div><div class="stat-value">RM ${tw.toFixed(0)}</div></div>
-    <div class="stat-card accent"><div class="stat-label">Potential profit${suffix}</div><div class="stat-value">RM ${profit.toFixed(0)}</div></div>`;
+    <div class="stat-card accent"><div class="stat-label">Products${_esc(suffix)}</div><div class="stat-value">${list.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Total units${_esc(suffix)}</div><div class="stat-value">${_esc(ts)}</div></div>
+    <div class="stat-card"><div class="stat-label">Inventory value${_esc(suffix)}</div><div class="stat-value">RM ${tw.toFixed(0)}</div></div>
+    <div class="stat-card accent"><div class="stat-label">Potential profit${_esc(suffix)}</div><div class="stat-value">RM ${profit.toFixed(0)}</div></div>`;
 }
 
 function getFilteredSorted() {
@@ -1016,20 +1006,20 @@ function renderInventory() {
   const oos     = f.filter(p => (p.stock || 0) <= 0);
   const row = p => { const out = (p.stock || 0) <= 0; const held = resvUnitsFor(p.barcode); return `
     <tr class="${out ? 'inv-oos' : ''}">
-      <td><input type="checkbox" class="sel-check" id="ichk-${p.barcode}" onchange="toggleRowSelect('${p.barcode}',this.checked)"></td>
-      <td>${p.img ? `<img class="thumb" src="${p.img}" alt="">` : `<div class="thumb-ph">🚗</div>`}</td>
-      <td><div class="prod-name">${p.name}${out ? ' <span class="oos-pill">Sold out</span>' : ''}${held ? ` <span class="resv-pill">${held} reserved</span>` : ''}</div><div class="prod-bc">${p.barcode}</div></td>
-      <td style="font-size:12px;color:var(--text-2)">${p.brand}<br><span style="color:var(--text-3);font-size:11px">${p.scale}</span></td>
+      <td><input type="checkbox" class="sel-check" id="ichk-${_esc(p.barcode)}" onchange="toggleRowSelect(${_js(p.barcode)},this.checked)"></td>
+      <td>${p.img ? `<img class="thumb" src="${_esc(_imageSrc(p.img))}" alt="">` : `<div class="thumb-ph">🚗</div>`}</td>
+      <td><div class="prod-name">${_esc(p.name)}${out ? ' <span class="oos-pill">Sold out</span>' : ''}${held ? ` <span class="resv-pill">${held} reserved</span>` : ''}</div><div class="prod-bc">${_esc(p.barcode)}</div></td>
+      <td style="font-size:12px;color:var(--text-2)">${_esc(p.brand)}<br><span style="color:var(--text-3);font-size:11px">${_esc(p.scale)}</span></td>
       <td style="font-weight:700;color:var(--blue)">RM ${p.price.toFixed(2)}</td>
       <td><div class="stepper">
-        <button class="stepper-btn" onclick="adjustStock('${p.barcode}',-1)">−</button>
-        <span class="stepper-qty" id="qty-${p.barcode}">${p.stock}</span>
-        <button class="stepper-btn" onclick="adjustStock('${p.barcode}',1)">+</button>
+        <button class="stepper-btn" onclick="adjustStock(${_js(p.barcode)},-1)">−</button>
+        <span class="stepper-qty" id="qty-${_esc(p.barcode)}">${_esc(p.stock)}</span>
+        <button class="stepper-btn" onclick="adjustStock(${_js(p.barcode)},1)">+</button>
       </div></td>
       <td><div class="action-cell">
-        ${out ? '' : `<button class="btn btn-outline btn-sm" onclick="openReserve('${p.barcode}')" title="Reserve for a customer">🔖</button>`}
-        <button class="btn btn-ghost btn-sm" onclick="editProduct('${p.barcode}')">Edit</button>
-        <button class="btn btn-danger btn-sm" onclick="requirePin(()=>deleteProduct('${p.barcode}'))">✕</button>
+        ${out ? '' : `<button class="btn btn-outline btn-sm" onclick="openReserve(${_js(p.barcode)})" title="Reserve for a customer">🔖</button>`}
+        <button class="btn btn-ghost btn-sm" onclick="editProduct(${_js(p.barcode)})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="requireManager(()=>deleteProduct(${_js(p.barcode)}))">✕</button>
       </div></td>
     </tr>`; };
   document.getElementById('inv-body').innerHTML = inStock.map(row).join('') +
@@ -1042,6 +1032,7 @@ function selectAllRows(ch) { document.querySelectorAll('[id^=ichk-]').forEach(c 
 function toggleSelectAll() { const all=document.querySelectorAll('[id^=ichk-]'); const any=[...all].some(c=>!c.checked); selectAllRows(any); document.getElementById('chk-all').checked=any; }
 function updateBulkBar() { const n=selectedRows.size; const bar=document.getElementById('bulk-bar'); if(n>0){bar.classList.add('show');document.getElementById('bulk-count').textContent=n+' selected';}else bar.classList.remove('show'); }
 function applyBulkEdit() {
+  if (!managerGuard(() => applyBulkEdit())) return;
   const np=document.getElementById('bulk-price').value; const ns=document.getElementById('bulk-stock').value;
   if(!np&&!ns){poToast('Enter a price or stock value first');return;}
   let ch=0; selectedRows.forEach(bc=>{const p=products.find(x=>x.barcode===bc);if(!p)return;if(np!=='')p.price=parseFloat(np)||p.price;if(ns!=='')p.stock=Math.max(0,parseInt(ns)||0);ch++;save('PRODUCT_UPSERT',p);});
@@ -1049,11 +1040,13 @@ function applyBulkEdit() {
   renderInventory(); renderStats(); poToast(ch+' products updated');
 }
 function bulkDelete() {
+  if (!managerGuard(() => bulkDelete())) return;
   if(!selectedRows.size)return; if(!confirm(`Delete ${selectedRows.size} products?`))return;
   selectedRows.forEach(bc => save('PRODUCT_DELETE',{barcode:bc}));
   products=products.filter(p=>!selectedRows.has(p.barcode)); selectedRows.clear(); _localSave(); renderInventory(); renderStats();
 }
 function adjustStock(bc, delta) {
+  if (!managerGuard(() => adjustStock(bc, delta))) return;
   const p=products.find(x=>x.barcode===bc); if(!p)return;
   const wasOut=(p.stock||0)<=0;
   p.stock=Math.max(0,p.stock+delta);
@@ -1063,6 +1056,7 @@ function adjustStock(bc, delta) {
   if (wasOut !== ((p.stock||0)<=0)) renderInventory();
 }
 function deleteProduct(bc) {
+  if (!managerGuard(() => deleteProduct(bc))) return;
   if(!confirm('Delete?'))return;
   products=products.filter(p=>p.barcode!==bc);
   save('PRODUCT_DELETE',{barcode:bc}); renderInventory(); renderStats();
@@ -1137,10 +1131,10 @@ function resvNameSuggest() {
   if (!m.length) { el.classList.remove('show'); el.innerHTML = ''; return; }
   el.innerHTML = m.map(r => {
     const items = resvItems(r);
-    return `<div class="suggest-row" onclick="resvAttach('${r.id}')">
-      <div class="po-av">${_poInitials(r.customer)}</div>
+    return `<div class="suggest-row" onclick="resvAttach(${_js(r.id)})">
+      <div class="po-av">${_esc(_poInitials(r.customer))}</div>
       <div style="flex:1;min-width:0"><div class="suggest-name">${_esc(r.customer)}</div>
-        <div class="suggest-sub">#${r.no || ''} · ${items.length} car(s) · Total RM ${resvTotal(r).toFixed(2)}</div></div>
+        <div class="suggest-sub">#${_esc(r.no || '')} · ${items.length} car(s) · Total RM ${resvTotal(r).toFixed(2)}</div></div>
       <span class="suggest-stock">＋ Add to stash</span>
     </div>`;
   }).join('');
@@ -1169,12 +1163,12 @@ function renderResvCart() {
     <div class="resv-line">
       <div style="flex:1;min-width:0"><div class="suggest-name">${_esc(i.prodName)}</div><div class="suggest-sub">${_esc(i.brand)} · RM ${i.price.toFixed(2)} · ${_resvAvail(i.barcode)} available</div></div>
       <div class="stepper">
-        <button class="stepper-btn" onclick="resvCartQty('${i.barcode}',-1)">−</button>
-        <span class="stepper-qty">${i.qty}</span>
-        <button class="stepper-btn" onclick="resvCartQty('${i.barcode}',1)">+</button>
+        <button class="stepper-btn" onclick="resvCartQty(${_js(i.barcode)},-1)">−</button>
+        <span class="stepper-qty">${_esc(i.qty)}</span>
+        <button class="stepper-btn" onclick="resvCartQty(${_js(i.barcode)},1)">+</button>
       </div>
       <div class="resv-line-total">RM ${(i.price * i.qty).toFixed(2)}</div>
-      <button class="remove-btn" onclick="resvCartRemove('${i.barcode}')">✕</button>
+      <button class="remove-btn" onclick="resvCartRemove(${_js(i.barcode)})">✕</button>
     </div>`).join('') || '<div class="po-empty" style="padding:12px">No cars yet — search below to add one</div>';
   resvUpdateBalance();
 }
@@ -1200,8 +1194,8 @@ function resvAddSuggest() {
     (p.barcode.toLowerCase() === q || p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q))).slice(0, 5);
   if (!m.length) { el.classList.remove('show'); el.innerHTML = ''; return; }
   el.innerHTML = m.map(p => `
-    <div class="suggest-row" onclick="resvAddPick('${p.barcode}')">
-      ${p.img ? `<img class="ls-img" src="${p.img}" alt="">` : '<div class="ls-ph">🚗</div>'}
+    <div class="suggest-row" onclick="resvAddPick(${_js(p.barcode)})">
+      ${p.img ? `<img class="ls-img" src="${_esc(_imageSrc(p.img))}" alt="">` : '<div class="ls-ph">🚗</div>'}
       <div style="flex:1;min-width:0"><div class="suggest-name">${_esc(p.name)}</div><div class="suggest-sub">${_esc(p.brand)} · RM ${p.price.toFixed(2)}</div></div>
       <span class="suggest-stock">${_resvAvail(p.barcode)} available</span>
     </div>`).join('');
@@ -1237,6 +1231,7 @@ function _resvApplyStockDelta(oldItems, newItems) {
   });
 }
 function saveReservation() {
+  if (!managerGuard(() => saveReservation())) return;
   const name = _poVal('resv-name').trim();
   if (!name) { showMsg('resv-msg', 'Customer name is required', 'err'); return; }
   if (!_resvCart.length) { showMsg('resv-msg', 'Add at least one car', 'err'); return; }
@@ -1280,22 +1275,23 @@ function renderReservations() {
     const first = items[0] || {};
     const carsLine = items.map(i => `${_esc(i.prodName)} ×${i.qty}`).join(', ');
     return `<div class="resv-row">
-      ${first.img ? `<img class="sold-thumb" src="${first.img}" alt="">` : '<div class="sold-ph">🚗</div>'}
+      ${first.img ? `<img class="sold-thumb" src="${_esc(_imageSrc(first.img))}" alt="">` : '<div class="sold-ph">🚗</div>'}
       <div class="resv-info">
-        <div class="resv-name">👤 ${_esc(r.customer)} <span class="resv-no">#${r.no || ''}</span>${r.phone ? ` <span class="resv-no">· 📞 ${_esc(r.phone)}</span>` : ''}</div>
+        <div class="resv-name">👤 ${_esc(r.customer)} <span class="resv-no">#${_esc(r.no || '')}</span>${r.phone ? ` <span class="resv-no">· 📞 ${_esc(r.phone)}</span>` : ''}</div>
         <div class="resv-sub resv-cars">🚗 ${carsLine}</div>
         <div class="resv-sub">Total <b>RM ${total.toFixed(2)}</b> · Deposit <b>RM ${(r.deposit || 0).toFixed(2)}</b> · Balance <b class="resv-due">RM ${bal.toFixed(2)}</b> · ${_esc((r.createdAt || '').split(',')[0])}${r.notes ? ' · 📝 ' + _esc(r.notes) : ''}</div>
       </div>
       <div class="resv-actions">
-        <button class="btn btn-outline btn-sm" onclick="resvEdit('${r.id}')" title="Edit / add cars">✎</button>
-        <button class="btn btn-ghost btn-sm" onclick="openResvReceipt('${r.id}')">📋 Receipt</button>
-        <button class="btn btn-primary btn-sm" onclick="resvMarkSold('${r.id}')">✓ Sold</button>
-        <button class="btn btn-danger btn-sm" onclick="resvCancel('${r.id}')" title="Cancel & return to stock">✕</button>
+        <button class="btn btn-outline btn-sm" onclick="resvEdit(${_js(r.id)})" title="Edit / add cars">✎</button>
+        <button class="btn btn-ghost btn-sm" onclick="openResvReceipt(${_js(r.id)})">📋 Receipt</button>
+        <button class="btn btn-primary btn-sm" onclick="resvMarkSold(${_js(r.id)})">✓ Sold</button>
+        <button class="btn btn-danger btn-sm" onclick="resvCancel(${_js(r.id)})" title="Cancel & return to stock">✕</button>
       </div>
     </div>`;
   }).join('');
 }
 function resvMarkSold(id) {
+  if (!managerGuard(() => resvMarkSold(id))) return;
   const r = reservations.find(x => x.id === id); if (!r) return;
   const items = resvItems(r);
   const total = resvTotal(r);
@@ -1306,7 +1302,7 @@ function resvMarkSold(id) {
     const rec = { id: 's_' + now, receiptNo: rNo, receiptNumber: rNo,
       date: new Date().toLocaleString('en-MY'), timestamp: now,
       items: items.map(i => i.prodName + ' ×' + i.qty).join(', '),
-      arr: items.map(i => ({ barcode: i.barcode, name: i.prodName, brand: i.brand, scale: i.scale, price: i.price, discPrice: undefined, qty: i.qty, img: i.img || null })),
+      arr: items.map(i => ({ barcode: i.barcode, name: i.prodName, brand: i.brand, scale: i.scale, price: i.price, qty: i.qty, img: i.img || null })),
       subtotal: total.toFixed(2), discount: '0.00', discType: 'rm', total: total.toFixed(2),
       paymentMethod: 'Cash', customer: r.customer,
       salesType, event: salesType === 'Physical' ? (ev ? ev.name : 'No event') : ONLINE_EVENT,
@@ -1329,6 +1325,7 @@ function resvMarkSold(id) {
   });
 }
 function resvCancel(id) {
+  if (!managerGuard(() => resvCancel(id))) return;
   const r = reservations.find(x => x.id === id); if (!r) return;
   const items = resvItems(r);
   const units = items.reduce((a, i) => a + i.qty, 0);
@@ -1431,6 +1428,7 @@ function lookupBarcode() {
   } else { clearForm(); document.getElementById('f-bc').value=bc; showMsg('bc-msg','New barcode — fill in details','ok'); }
 }
 function saveProduct() {
+  if (!managerGuard(() => saveProduct())) return;
   const bc=document.getElementById('f-bc').value.trim(); const name=document.getElementById('f-name').value.trim();
   const price=parseFloat(document.getElementById('f-price').value)||0;
   const stock=parseInt(document.getElementById('f-stock').value)||1;
@@ -1461,7 +1459,8 @@ function saveProduct() {
   closeProductModal();
   renderInventory(); renderStats();
 }
-function deleteFromForm() { if(!editingBc||!confirm('Delete?'))return; save('PRODUCT_DELETE',{barcode:editingBc}); products=products.filter(p=>p.barcode!==editingBc); _localSave(); closeProductModal(); renderInventory(); renderStats(); }
+function deleteFromForm() {
+  if (!managerGuard(() => deleteFromForm())) return; if(!editingBc||!confirm('Delete?'))return; save('PRODUCT_DELETE',{barcode:editingBc}); products=products.filter(p=>p.barcode!==editingBc); _localSave(); closeProductModal(); renderInventory(); renderStats(); }
 function clearForm() {
   ['f-bc','f-name','f-price','f-stock','f-cost'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('bc-input').value=''; document.getElementById('f-brand').value='Mini GT'; document.getElementById('f-scale').value='1:64';
@@ -1492,8 +1491,8 @@ function flattenSoldItems() {
 // Channel/event chip for a flattened sold item (shared by manager + cashier views).
 function soldItemChip(it) {
   return it.salesType === 'Online'
-    ? `<span class="hist-channel-chip online">🌐 ${it.platform}</span>`
-    : `<span class="hist-channel-chip">🏬 ${it.soldEvent}</span>`;
+    ? `<span class="hist-channel-chip online">🌐 ${_esc(it.platform)}</span>`
+    : `<span class="hist-channel-chip">🏬 ${_esc(it.soldEvent)}</span>`;
 }
 function renderSoldItems() {
   const container = document.getElementById('sold-list');
@@ -1502,10 +1501,10 @@ function renderSoldItems() {
   container.innerHTML = soldItems.map((item, i) => {
     const dp = item.discPrice !== undefined ? item.discPrice : item.price;
     return `<div class="sold-row">
-      ${item.img ? `<img class="sold-thumb" src="${item.img}" alt="">` : `<div class="sold-ph">🚗</div>`}
+      ${item.img ? `<img class="sold-thumb" src="${_esc(_imageSrc(item.img))}" alt="">` : `<div class="sold-ph">🚗</div>`}
       <div class="sold-info">
-        <div class="sold-name">${item.name}</div>
-        <div class="sold-meta">${soldItemChip(item)}${item.brand} · ${item.scale} · ×${item.qty} · #${item.receiptNo} · ${item.saleDate}</div>
+        <div class="sold-name">${_esc(item.name)}</div>
+        <div class="sold-meta">${soldItemChip(item)}${_esc(item.brand)} · ${_esc(item.scale)} · ×${_esc(item.qty)} · #${_esc(item.receiptNo)} · ${_esc(item.saleDate)}</div>
       </div>
       <div class="sold-price">RM ${(dp*item.qty).toFixed(2)}</div>
       <button class="btn btn-ghost btn-sm" onclick="restoreToInventory(${i})">↩ Restore to stock</button>
@@ -1516,6 +1515,7 @@ function renderSoldItems() {
 }
 
 function restoreToInventory(idx) {
+  if (!managerGuard(() => restoreToInventory(idx))) return;
   const item = window._soldItems[idx];
   if (!item) return;
   if (!confirm(`Restore ${item.qty}x "${item.name}" back to inventory? This will increase stock by ${item.qty}.`)) return;
@@ -1582,10 +1582,10 @@ function renderCashierSold(q) {
   list.innerHTML = items.map(it => {
     const dp = it.discPrice !== undefined ? it.discPrice : it.price;
     return `<div class="cs-row">
-      ${it.img ? `<img class="cs-thumb" src="${it.img}" alt="">` : `<div class="cs-ph">🚗</div>`}
+      ${it.img ? `<img class="cs-thumb" src="${_esc(_imageSrc(it.img))}" alt="">` : `<div class="cs-ph">🚗</div>`}
       <div class="cs-info">
-        <div class="cs-name">${it.name}</div>
-        <div class="cs-meta">${soldItemChip(it)}${it.brand} · ${it.scale} · ×${it.qty} · #${it.receiptNo || '—'} · ${it.saleDate || ''}</div>
+        <div class="cs-name">${_esc(it.name)}</div>
+        <div class="cs-meta">${soldItemChip(it)}${_esc(it.brand)} · ${_esc(it.scale)} · ×${_esc(it.qty)} · #${_esc(it.receiptNo || '—')} · ${_esc(it.saleDate || '')}</div>
       </div>
       <div class="cs-price">RM ${(dp * it.qty).toFixed(2)}</div>
     </div>`;
@@ -1601,15 +1601,15 @@ function renderLabelList(q) {
   if (!avail.length) { list.innerHTML='<div class="empty-state"><span class="empty-icon">🏷️</span><div class="empty-title">No in-stock products</div><div class="empty-sub">Out-of-stock items are hidden from label printing</div></div>'; updateLabelBadge(); return; }
   const f = q ? avail.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())||p.brand.toLowerCase().includes(q.toLowerCase())) : avail;
   list.innerHTML = f.map(p => `
-    <div class="label-row" id="lr-${p.barcode}">
-      <input type="checkbox" class="label-row-check" id="lc-${p.barcode}" onchange="onLabelCheck('${p.barcode}')">
-      <div class="label-row-info" onclick="document.getElementById('lc-${p.barcode}').click()">
-        <div class="label-row-name">${p.name}</div>
-        <div class="label-row-sub">${p.brand} · ${p.scale} · RM ${p.price.toFixed(2)} · Stock: ${p.stock}</div>
+    <div class="label-row" id="lr-${_esc(p.barcode)}">
+      <input type="checkbox" class="label-row-check" id="lc-${_esc(p.barcode)}" onchange="onLabelCheck(${_js(p.barcode)})">
+      <div class="label-row-info" onclick="document.getElementById(${_js('lc-' + p.barcode)}).click()">
+        <div class="label-row-name">${_esc(p.name)}</div>
+        <div class="label-row-sub">${_esc(p.brand)} · ${_esc(p.scale)} · RM ${p.price.toFixed(2)} · Stock: ${_esc(p.stock)}</div>
       </div>
       <div class="label-qty-wrap">
         <span>Qty</span>
-        <input class="label-qty-input" type="number" id="lq-${p.barcode}" value="${Math.max(1,p.stock)}" min="1" inputmode="numeric" oninput="updateLabelBadge()">
+        <input class="label-qty-input" type="number" id="lq-${_esc(p.barcode)}" value="${Math.max(1,p.stock)}" min="1" inputmode="numeric" oninput="updateLabelBadge()">
       </div>
     </div>`).join('');
   updateLabelBadge();
@@ -1642,7 +1642,7 @@ function printLabelSheet() {
     return `<div class="sheet">${page.map(p => {
       if (!p) return `<div class="lbl"></div>`;
       const name = p.name.length > 28 ? p.name.substring(0,26)+'…' : p.name;
-      return `<div class="lbl"><div class="lbl-name">${name}</div><div class="lbl-brand">${p.brand} ${p.scale}</div><img class="lbl-bc" src="${bcCache[p.barcode]}" alt="${p.barcode}"><div class="lbl-bc-text">${p.barcode}</div><div class="lbl-price">RM ${p.price.toFixed(2)}</div></div>`;
+      return `<div class="lbl"><div class="lbl-name">${_esc(name)}</div><div class="lbl-brand">${_esc(p.brand)} ${_esc(p.scale)}</div><img class="lbl-bc" src="${bcCache[p.barcode]}" alt="${_esc(p.barcode)}"><div class="lbl-bc-text">${_esc(p.barcode)}</div><div class="lbl-price">RM ${p.price.toFixed(2)}</div></div>`;
     }).join('')}</div>`;
   }).join('');
 
@@ -1668,6 +1668,7 @@ function printLabelSheet() {
 
 // ── IMPORT/EXPORT ──
 function exportCSV() {
+  if (!managerGuard(() => exportCSV())) return;
   if (!products.length) { alert('No products.'); return; }
   const rows = [['Barcode','Name','Brand','Scale','Price','Stock','Cost']];
   products.forEach(p => rows.push([
@@ -1698,10 +1699,12 @@ function closeImportModal() { cancelImport(); poClose('import-modal'); }
 // sales log, events, pre-orders, reservations, receipt counter. Restore
 // replaces this browser's data and reloads (it does NOT broadcast to other
 // devices — they keep their own state / the Firebase event log).
-function openBackup() { const m = document.getElementById('backup-msg'); if (m) m.innerHTML = ''; poOpen('backup-modal'); }
+function openBackup() {
+  if (!managerGuard(() => openBackup())) return; const m = document.getElementById('backup-msg'); if (m) m.innerHTML = ''; poOpen('backup-modal'); }
 // Pull everything from the cloud into this device (fixes a new device / phone
 // app that opened with no data). Shows the real result/error inline.
 async function resyncFromCloud() {
+  if (!managerGuard(() => resyncFromCloud())) return;
   const el = document.getElementById('backup-msg');
   if (el) el.innerHTML = '<div class="msg msg-ok">☁ Pulling from cloud…</div>';
   if (!window.SyncEngine) { if (el) el.innerHTML = '<div class="msg msg-err">Sync engine not loaded — check your internet.</div>'; return; }
@@ -1717,6 +1720,7 @@ async function resyncFromCloud() {
 // Upload THIS device's data to the cloud (make it the master). Use on the
 // device that has the newest data (e.g. the phone with the latest photos).
 async function pushToCloud() {
+  if (!managerGuard(() => pushToCloud())) return;
   const el = document.getElementById('backup-msg');
   const n = products.length + sales.length + poItems.length + reservations.length;
   if (el) el.innerHTML = `<div class="msg msg-ok">⬆ Uploading ${n} records to the cloud…</div>`;
@@ -1730,6 +1734,7 @@ async function pushToCloud() {
   }
 }
 function downloadFullBackup() {
+  if (!managerGuard(() => downloadFullBackup())) return;
   const payload = {
     app: 'mobihobby-pos', version: 1, exportedAt: new Date().toISOString(),
     data: { products, sales, events, activeEventId, receiptCounter, customers, poBatches, poItems, reservations, listingCounter }
@@ -1739,6 +1744,7 @@ function downloadFullBackup() {
   poToast('Backup downloaded — keep a copy somewhere safe');
 }
 function handleRestoreFile(input) {
+  if (!managerGuard(() => handleRestoreFile(input))) return;
   const f = input.files[0]; input.value = ''; if (!f) return;
   const r = new FileReader();
   r.onload = e => {
@@ -1794,9 +1800,9 @@ function renderListPicker(q) {
   if (query) items = items.filter(p => p.name.toLowerCase().includes(query) || p.brand.toLowerCase().includes(query) || p.barcode.toLowerCase().includes(query));
   if (!items.length) { el.innerHTML = '<div class="po-empty">No matching in-stock items</div>'; return; }
   el.innerHTML = items.slice(0, 40).map(p => `
-    <div class="list-pick-row" onclick="listAdd('${p.barcode}')">
-      ${p.img ? `<img class="thumb" src="${p.img}" alt="">` : '<div class="thumb-ph">🚗</div>'}
-      <div style="flex:1;min-width:0"><div class="prod-name">${_esc(p.name)}</div><div class="prod-bc">${_esc(p.brand)} · Stock ${p.stock} · ${listFmtPrice(p.price)}</div></div>
+    <div class="list-pick-row" onclick="listAdd(${_js(p.barcode)})">
+      ${p.img ? `<img class="thumb" src="${_esc(_imageSrc(p.img))}" alt="">` : '<div class="thumb-ph">🚗</div>'}
+      <div style="flex:1;min-width:0"><div class="prod-name">${_esc(p.name)}</div><div class="prod-bc">${_esc(p.brand)} · Stock ${_esc(p.stock)} · ${listFmtPrice(p.price)}</div></div>
       <span class="list-add-btn">＋ Add</span>
     </div>`).join('');
 }
@@ -1826,18 +1832,18 @@ function renderListBatch() {
     return `<div class="list-item ${b.posted ? 'posted' : ''} ${isCurrent ? 'current' : ''}">
       <div class="list-item-top">
         <div class="list-num">${num}</div>
-        ${p.img ? `<img class="thumb" src="${p.img}" alt="">` : '<div class="thumb-ph">🚗</div>'}
+        ${p.img ? `<img class="thumb" src="${_esc(_imageSrc(p.img))}" alt="">` : '<div class="thumb-ph">🚗</div>'}
         <div class="list-item-main">
           <div class="prod-name">${_esc(p.name || '(removed)')}</div>
-          <div class="list-preview">Available: ${p.stock ?? 0} · ${listFmtPrice(p.price)}</div>
+          <div class="list-preview">Available: ${_esc(p.stock ?? 0)} · ${listFmtPrice(p.price)}</div>
         </div>
         ${b.posted ? `<span class="list-done-tag">✓ Posted #${b.num}</span>` : ''}
       </div>
       ${b.posted ? '' : `<div class="list-item-actions">
-        <button class="btn btn-ghost btn-sm" onclick="listCopyText('${b.barcode}',${num})">📋 Listing</button>
-        <button class="btn btn-ghost btn-sm" onclick="listCopyPhoto('${b.barcode}')" ${hasPhoto ? '' : 'disabled title="No photo on this item"'}>🖼 Photo</button>
-        <button class="btn btn-primary btn-sm" onclick="listMarkPosted('${b.barcode}')" ${isCurrent ? '' : 'disabled title="Do the highlighted item next"'}>✓ Posted</button>
-        <button class="list-x" onclick="listRemove('${b.barcode}')" title="Remove">✕</button>
+        <button class="btn btn-ghost btn-sm" onclick="listCopyText(${_js(b.barcode)},${num})">📋 Listing</button>
+        <button class="btn btn-ghost btn-sm" onclick="listCopyPhoto(${_js(b.barcode)})" ${hasPhoto ? '' : 'disabled title="No photo on this item"'}>🖼 Photo</button>
+        <button class="btn btn-primary btn-sm" onclick="listMarkPosted(${_js(b.barcode)})" ${isCurrent ? '' : 'disabled title="Do the highlighted item next"'}>✓ Posted</button>
+        <button class="list-x" onclick="listRemove(${_js(b.barcode)})" title="Remove">✕</button>
       </div>`}
     </div>`;
   }).join('');
@@ -1884,6 +1890,7 @@ function listMarkPosted(bc) {
   poToast(`Marked #${it.num} posted · next is ${listingCounter + 1}`);
 }
 function listSetNextNum() {
+  if (!managerGuard(() => listSetNextNum())) return;
   const v = prompt('Set the NEXT listing number:', String(listingCounter + 1));
   if (v === null) return;
   const n = parseInt(v);
@@ -1915,7 +1922,7 @@ function handleCSVImport(input) {
     pendingImportData=parsed;
     document.getElementById('import-preview').innerHTML=`<div class="import-preview"><table>
       <thead><tr><th>Name</th><th>Brand</th><th>Scale</th><th>Price</th><th>Stock</th></tr></thead>
-      <tbody>${parsed.slice(0,8).map(p=>`<tr><td>${p.name}</td><td>${p.brand}</td><td>${p.scale}</td><td>RM ${p.price.toFixed(2)}</td><td>${p.stock}</td></tr>`).join('')}
+      <tbody>${parsed.slice(0,8).map(p=>`<tr><td>${_esc(p.name)}</td><td>${_esc(p.brand)}</td><td>${_esc(p.scale)}</td><td>RM ${p.price.toFixed(2)}</td><td>${_esc(p.stock)}</td></tr>`).join('')}
       ${parsed.length>8?`<tr><td colspan="5" style="color:#9aa3be;text-align:center;padding:8px">…and ${parsed.length-8} more</td></tr>`:''}</tbody>
     </table></div>`;
     document.getElementById('import-count').textContent=parsed.length;
@@ -1925,6 +1932,7 @@ function handleCSVImport(input) {
   reader.readAsText(file);
 }
 function confirmImport() {
+  if (!managerGuard(() => confirmImport())) return;
   let added=0,updated=0;
   pendingImportData.forEach(row=>{
     const i=products.findIndex(p=>p.barcode===row.barcode);
@@ -1956,7 +1964,8 @@ function renderSales() {
 }
 
 // ── HISTORY ──
-function clearHistory() { if(!confirm('Clear ALL history?'))return; sales=[]; save('HISTORY_CLEAR', { timestamp: Date.now() }); renderHistory(); renderHistStats(); }
+function clearHistory() {
+  if (!managerGuard(() => clearHistory())) return; if(!confirm('Clear ALL history?'))return; sales=[]; save('HISTORY_CLEAR', { timestamp: Date.now() }); renderHistory(); renderHistStats(); }
 // History has two mutually-exclusive report modes (per spec):
 //   events → Physical sales only (grouped by event, incl. Walk-in); excludes Online
 //   online → Online sales only (grouped/filtered by platform); excludes Physical
@@ -2001,10 +2010,10 @@ function renderHistStats() {
   const todayRev=rows.filter(r=>r.s.date&&r.s.date.includes(today)).reduce((a,r)=>a+parseFloat(r.s.total),0);
   const label=histMode==='online'?'Online':'Event';
   document.getElementById('hist-stats').innerHTML=`
-    <div class="stat-card"><div class="stat-label">${label} sales</div><div class="stat-value">${rows.length}</div></div>
+    <div class="stat-card"><div class="stat-label">${_esc(label)} sales</div><div class="stat-value">${rows.length}</div></div>
     <div class="stat-card"><div class="stat-label">Items sold</div><div class="stat-value">${items}</div></div>
     <div class="stat-card accent"><div class="stat-label">Today</div><div class="stat-value">RM ${todayRev.toFixed(0)}</div></div>
-    <div class="stat-card accent"><div class="stat-label">${label} revenue</div><div class="stat-value">RM ${rev.toFixed(0)}</div></div>`;
+    <div class="stat-card accent"><div class="stat-label">${_esc(label)} revenue</div><div class="stat-value">RM ${rev.toFixed(0)}</div></div>`;
 }
 function renderHistory() {
   const body=document.getElementById('hist-body'); const em=document.getElementById('sales-empty');
@@ -2023,19 +2032,19 @@ function renderHistory() {
     const daysHtml=Object.entries(dayGroups).map(([day,drows])=>{
       const dt=drows.reduce((a,r)=>a+parseFloat(r.s.total),0);
       return`<div class="hist-day-group">
-        <div class="hist-day-header"><span class="hist-day-label">📅 ${day}</span><span class="hist-day-total">RM ${dt.toFixed(2)}</span></div>
+        <div class="hist-day-header"><span class="hist-day-label">📅 ${_esc(day)}</span><span class="hist-day-total">RM ${dt.toFixed(2)}</span></div>
         <table class="hist-table"><thead><tr><th>#</th><th>Time</th><th>Items</th><th>Total</th></tr></thead><tbody>
-        ${drows.map(r=>{const s=r.s; const chip = r.v.salesType==='Online' ? `<span class="hist-channel-chip online">${r.v.platform}</span>` : '';
+        ${drows.map(r=>{const s=r.s; const chip = r.v.salesType==='Online' ? `<span class="hist-channel-chip online">${_esc(r.v.platform)}</span>` : '';
           return `<tr onclick="showReceipt(sales[${r.origIdx}])">
-          <td style="font-size:11px;color:var(--blue);font-weight:700">#${s.receiptNo||'—'}</td>
-          <td style="font-size:12px;color:var(--text-2);white-space:nowrap">${(s.date||'').split(',')[1]?.trim()||s.date}</td>
-          <td style="font-size:12px;color:var(--text-2)">${chip}${s.customer?'👤 '+s.customer+' · ':''}${s.items}</td>
-          <td class="hist-total">RM ${s.total}${parseFloat(s.discount||0)>0?`<br><span style="font-size:10px;color:var(--success)">−RM ${s.discount}</span>`:''}</td>
+          <td style="font-size:11px;color:var(--blue);font-weight:700">#${_esc(s.receiptNo||'—')}</td>
+          <td style="font-size:12px;color:var(--text-2);white-space:nowrap">${_esc((s.date||'').split(',')[1]?.trim()||s.date)}</td>
+          <td style="font-size:12px;color:var(--text-2)">${chip}${_esc(s.customer?'👤 '+s.customer+' · ':'')}${_esc(s.items)}</td>
+          <td class="hist-total">RM ${_esc(s.total)}${parseFloat(s.discount||0)>0?`<br><span style="font-size:10px;color:var(--success)">−RM ${_esc(s.discount)}</span>`:''}</td>
         </tr>`;}).join('')}
         </tbody></table></div>`;
     }).join('');
     return`<div class="hist-event-group">
-      <div class="hist-event-header"><div><div class="hist-event-name">${label}</div><div class="hist-event-meta">${grows.length} transactions</div></div><div class="hist-event-total">RM ${gTotal.toFixed(2)}</div></div>
+      <div class="hist-event-header"><div><div class="hist-event-name">${_esc(label)}</div><div class="hist-event-meta">${grows.length} transactions</div></div><div class="hist-event-total">RM ${gTotal.toFixed(2)}</div></div>
       ${daysHtml}</div>`;
   }).join('');
 }
@@ -2060,7 +2069,14 @@ let _poAddBatchId = null, _poReceiveBatch = null, _poInvoiceCust = null, _poConf
 // ── small helpers ──
 function _poVal(id) { const e = document.getElementById(id); return e ? e.value : ''; }
 function _poSet(id, v) { const e = document.getElementById(id); if (e) e.value = v; }
-function _esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m])); }
+function _esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
+function _js(value) { return _esc(JSON.stringify(String(value))); }
+function _imageSrc(value) {
+  const source = String(value || '');
+  if (/^data:image\/(png|jpeg|jpg|webp|gif);base64,[a-zA-Z0-9+/=\s]+$/.test(source)) return source;
+  try { const url = new URL(source, document.baseURI); return ['https:', 'http:'].includes(url.protocol) ? url.href : ''; }
+  catch (_) { return ''; }
+}
 function _normPhone(p) { return (p || '').replace(/\D/g, ''); }
 function _poInitials(n) { return (n || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase(); }
 
@@ -2095,20 +2111,25 @@ function poUnitPrice(it) { const b = poBatchById(it.batchId); return b ? (Number
 function poItemTotal(it) { return poUnitPrice(it) * (it.qty || 0); }
 function poItemOutstanding(it) { return Math.max(0, poItemTotal(it) - (Number(it.depositPaid) || 0)); }
 function poIsActive(it) { return !['Completed', 'Cancelled'].includes(it.status); }
-function poImgStyle(b) { return b && b.img ? `style="background-image:url('${b.img}')"` : ''; }
+function poImgStyle(b) {
+  if (!b || !b.img) return '';
+  const src = _imageSrc(b.img).replace(/['"()<>\\]/g, ch => '%' + ch.charCodeAt(0).toString(16));
+  return 'style="background-image:url(' + _esc(src) + ')"';
+}
 function poImgInner(b) { return b && b.img ? '' : '🚗'; }
 
 // ── modal / toast / confirm primitives ──
 function poOpen(id) { document.getElementById(id).classList.add('open'); }
 function poClose(id) { document.getElementById(id).classList.remove('open'); }
 function poConfirm(html, cb) { _poConfirmCb = cb; document.getElementById('po-confirm-msg').innerHTML = html; poOpen('po-confirm'); }
-function poConfirmYes() { const cb = _poConfirmCb; _poConfirmCb = null; poClose('po-confirm'); if (cb) cb(); }
+function poConfirmYes() {
+  if (!managerGuard(() => poConfirmYes())) return; const cb = _poConfirmCb; _poConfirmCb = null; poClose('po-confirm'); if (cb) cb(); }
 function poConfirmNo() { _poConfirmCb = null; poClose('po-confirm'); }
 function poToast(msg, undoFn) {
   const t = document.getElementById('po-toast'); if (!t) return;
   document.getElementById('po-toast-msg').textContent = msg;
   const u = document.getElementById('po-toast-undo');
-  if (undoFn) { u.style.display = ''; u.onclick = () => { clearTimeout(_poToastT); t.classList.remove('show'); undoFn(); }; }
+  if (undoFn) { u.style.display = ''; u.onclick = () => requireManager(() => { clearTimeout(_poToastT); t.classList.remove('show'); undoFn(); }); }
   else { u.style.display = 'none'; u.onclick = null; }
   t.classList.add('show'); clearTimeout(_poToastT);
   _poToastT = setTimeout(() => t.classList.remove('show'), undoFn ? 7000 : 2600);
@@ -2130,7 +2151,7 @@ function handlePoImg(input) {
 function poRenderImgPreview() {
   const box = document.getElementById('po-img-box'); if (!box) return;
   box.innerHTML = pendingPoImg
-    ? `<img src="${pendingPoImg}" class="po-up-prev" alt=""><button type="button" class="po-up-x" onclick="poRemoveImg(event)">✕</button><input type="file" accept="image/*" onchange="handlePoImg(this)">`
+    ? `<img src="${_esc(_imageSrc(pendingPoImg))}" class="po-up-prev" alt=""><button type="button" class="po-up-x" onclick="poRemoveImg(event)">✕</button><input type="file" accept="image/*" onchange="handlePoImg(this)">`
     : `<span style="font-size:26px">📷</span><span style="font-size:12px">Tap to upload photo</span><input type="file" accept="image/*" onchange="handlePoImg(this)">`;
 }
 function poRemoveImg(e) { if (e) e.stopPropagation(); pendingPoImg = null; poRenderImgPreview(); }
@@ -2142,6 +2163,7 @@ function openPoBatch() {
   poRenderImgPreview(); document.getElementById('po-b-msg').innerHTML = ''; poOpen('po-batch-modal');
 }
 function createPoBatch() {
+  if (!managerGuard(() => createPoBatch())) return;
   const name = _poVal('po-b-name').trim();
   if (!name) { showMsg('po-b-msg', 'Model name is required', 'err'); return; }
   const b = { id: 'pob_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
@@ -2155,6 +2177,7 @@ function createPoBatch() {
 
 // ── find-or-create customer (no duplicates; phone-first match) ──
 function findOrCreateCustomer({ name, phone, platform, address, notes }) {
+  if (!managerGuard(() => findOrCreateCustomer({ name, phone, platform, address, notes }))) return;
   const np = _normPhone(phone); const ln = (name || '').trim().toLowerCase();
   let c = customers.find(x => (np && _normPhone(x.phone) === np) || (!np && ln && x.name.trim().toLowerCase() === ln));
   if (c) {
@@ -2181,6 +2204,7 @@ function openAddCustomer(batchId) {
   _poSet('po-c-qty', '1'); document.getElementById('po-c-msg').innerHTML = ''; poOpen('po-cust-modal');
 }
 function addCustomerToBatch() {
+  if (!managerGuard(() => addCustomerToBatch())) return;
   const name = _poVal('po-c-name').trim();
   if (!name) { showMsg('po-c-msg', 'Customer name is required', 'err'); return; }
   if (!_poAddBatchId) { showMsg('po-c-msg', 'No model selected', 'err'); return; }
@@ -2204,6 +2228,7 @@ function openEditCustomer(id) {
   document.getElementById('po-edit-modal').dataset.id = id; poOpen('po-edit-modal');
 }
 function saveEditCustomer() {
+  if (!managerGuard(() => saveEditCustomer())) return;
   const id = document.getElementById('po-edit-modal').dataset.id; const c = poCustomerById(id); if (!c) return;
   c.name = _poVal('po-e-name').trim() || c.name; c.phone = _poVal('po-e-phone').trim();
   c.platform = _poVal('po-e-platform'); c.address = _poVal('po-e-address').trim(); c.notes = _poVal('po-e-notes').trim();
@@ -2215,13 +2240,15 @@ function saveEditCustomer() {
 const PO_RESTING = ['Waiting Stock', 'Arrived', 'Awaiting Payment', 'Ready To Ship', 'Shipped', 'Completed'];
 function poPrevStatus(s) { const i = PO_RESTING.indexOf(s); return i > 0 ? PO_RESTING[i - 1] : null; }
 function poAskStatus(itemId, to) {
+  if (!managerGuard(() => poAskStatus(itemId, to))) return;
   const it = poItems.find(x => x.id === itemId); if (!it) return;
   const b = poBatchById(it.batchId), c = poCustomerById(it.customerId);
-  poConfirm(`Mark <b>${_esc(b ? b.modelName : 'item')}</b> for ${_esc(c ? c.name : 'customer')} as <b>${to}</b>?`, () => {
+  poConfirm(`Mark <b>${_esc(b ? b.modelName : 'item')}</b> for ${_esc(c ? c.name : 'customer')} as <b>${_esc(to)}</b>?`, () => {
     it.status = to; save('POITEM_UPSERT', it); renderPreorders(); poToast('Status → ' + to);
   });
 }
 function poAskPaid(itemId) {
+  if (!managerGuard(() => poAskPaid(itemId))) return;
   const it = poItems.find(x => x.id === itemId); if (!it) return; const b = poBatchById(it.batchId);
   poConfirm(`Mark <b>${_esc(b ? b.modelName : 'item')}</b> as <b>Paid</b>?<br>Balance becomes RM 0 and moves to Ready To Ship.`, () => {
     it.paidPrevDeposit = Number(it.depositPaid) || 0;   // remembered so Back can restore
@@ -2230,16 +2257,18 @@ function poAskPaid(itemId) {
   });
 }
 function poAskCancel(itemId) {
+  if (!managerGuard(() => poAskCancel(itemId))) return;
   const it = poItems.find(x => x.id === itemId); if (!it) return;
   poConfirm('Cancel this preorder item?', () => { it.status = 'Cancelled'; save('POITEM_UPSERT', it); renderPreorders(); poToast('Cancelled'); });
 }
 // Step one phase back (confirmed). Restores the pre-paid deposit when undoing a payment.
 function poBackStatus(itemId) {
+  if (!managerGuard(() => poBackStatus(itemId))) return;
   const it = poItems.find(x => x.id === itemId); if (!it) return;
   const prev = it.status === 'Cancelled' ? 'Waiting Stock' : poPrevStatus(it.status);
   if (!prev) { poToast('Already at the first step'); return; }
   const b = poBatchById(it.batchId);
-  poConfirm(`Move <b>${_esc(b ? b.modelName : 'item')}</b> back to <b>${prev}</b>?`, () => {
+  poConfirm(`Move <b>${_esc(b ? b.modelName : 'item')}</b> back to <b>${_esc(prev)}</b>?`, () => {
     if (it.status === 'Ready To Ship' && prev === 'Awaiting Payment' && it.paidPrevDeposit !== undefined) {
       it.depositPaid = it.paidPrevDeposit; delete it.paidPrevDeposit;
     }
@@ -2259,6 +2288,7 @@ function poBackStatus(itemId) {
 
 // ── hard deletes (confirmed; for cleanup/trial) — sync via {_deleted} ──
 function deletePoItem(id) {
+  if (!managerGuard(() => deletePoItem(id))) return;
   const it = poItems.find(x => x.id === id); if (!it) return; const b = poBatchById(it.batchId);
   poConfirm(`Delete this preorder (${_esc(b ? b.modelName : 'item')})?<br>This cannot be undone.`, () => {
     save('POITEM_UPSERT', { id, _deleted: true });
@@ -2266,6 +2296,7 @@ function deletePoItem(id) {
   });
 }
 function deletePoBatch(id) {
+  if (!managerGuard(() => deletePoBatch(id))) return;
   const b = poBatchById(id); if (!b) return; const its = poItemsForBatch(id);
   poConfirm(`Delete batch "<b>${_esc(b.modelName)}</b>"${its.length ? ` and its ${its.length} preorder item(s)` : ''}?<br>This cannot be undone.`, () => {
     its.forEach(it => save('POITEM_UPSERT', { id: it.id, _deleted: true }));
@@ -2275,6 +2306,7 @@ function deletePoBatch(id) {
   });
 }
 function deletePoCustomer() {
+  if (!managerGuard(() => deletePoCustomer())) return;
   const id = document.getElementById('po-edit-modal').dataset.id; const c = poCustomerById(id); if (!c) return;
   const its = poItemsForCustomer(id);
   poConfirm(`Delete customer "<b>${_esc(c.name)}</b>"${its.length ? ` and their ${its.length} preorder item(s)` : ''}?<br>This cannot be undone.`, () => {
@@ -2294,6 +2326,7 @@ function poAllocatedUnits(batchId) {
 // longest-waiting orders (FIFO). Runs on receive AND on adding a customer, so
 // banked stock auto-fills new preorders. Returns how many orders were filled.
 function poAllocate(batchId) {
+  if (!managerGuard(() => poAllocate(batchId))) return;
   const b = poBatchById(batchId); if (!b) return 0;
   let avail = Math.max(0, (b.received || 0) - poAllocatedUnits(batchId));
   let n = 0;
@@ -2304,6 +2337,7 @@ function poAllocate(batchId) {
 }
 // quick +/- on received stock (can't drop below already-allocated), re-allocates
 function poAdjustReceived(id, delta) {
+  if (!managerGuard(() => poAdjustReceived(id, delta))) return;
   const b = poBatchById(id); if (!b) return;
   const alloc = poAllocatedUnits(id);
   const v = Math.max(alloc, (b.received || 0) + delta);
@@ -2322,6 +2356,7 @@ function openReceive(batchId) {
   poOpen('po-receive-modal');
 }
 function doReceiveStock() {
+  if (!managerGuard(() => doReceiveStock())) return;
   const b = poBatchById(_poReceiveBatch); if (!b) return;
   let total = parseInt(_poVal('po-rec-qty')); if (isNaN(total) || total < 0) { poClose('po-receive-modal'); return; }
   const alloc = poAllocatedUnits(_poReceiveBatch);
@@ -2335,6 +2370,7 @@ function doReceiveStock() {
 
 // ── notify: Arrived → Awaiting Payment, list each copyable invoice ──
 function poNotify(batchId) {
+  if (!managerGuard(() => poNotify(batchId))) return;
   poItemsForBatch(batchId).filter(i => i.status === 'Arrived').forEach(i => { i.status = 'Awaiting Payment'; save('POITEM_UPSERT', i); });
   const custIds = [...new Set(poItemsForBatch(batchId).filter(i => PO_INVOICE_STATUSES.includes(i.status)).map(i => i.customerId))];
   renderPreorders();
@@ -2342,7 +2378,7 @@ function poNotify(batchId) {
   document.getElementById('po-notify-list').innerHTML = custIds.map(cid => {
     const c = poCustomerById(cid);
     return `<div class="po-notify-row"><div><b>${_esc(c.name)}</b><div class="po-cust-sub">${_esc(c.platform || '')}${c.phone ? ' · ' + _esc(c.phone) : ''}</div></div>
-      <button class="btn btn-primary btn-sm" onclick="openInvoice('${cid}')">📋 Copy invoice</button></div>`;
+      <button class="btn btn-primary btn-sm" onclick="openInvoice(${_js(cid)})">📋 Copy invoice</button></div>`;
   }).join('') || '<div class="po-empty">No eligible customers</div>';
   poOpen('po-notify-modal');
 }
@@ -2398,6 +2434,7 @@ function openEditItem(id) {
   poOpen('po-item-modal');
 }
 function saveEditItem() {
+  if (!managerGuard(() => saveEditItem())) return;
   const it = poItems.find(x => x.id === _poEditItemId); if (!it) return;
   it.qty = Math.max(1, parseInt(_poVal('po-it-qty')) || 1);
   it.depositPaid = parseFloat(_poVal('po-it-deposit')) || 0;
@@ -2452,11 +2489,13 @@ function _poCsv(v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '
 function _poDownload(name, content, type) { const blob = new Blob([content], { type }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); }
 function openExport() { poOpen('po-export-modal'); }
 function poExportJSON() {
+  if (!managerGuard(() => poExportJSON())) return;
   _poDownload('mobihobby_preorders_' + new Date().toISOString().slice(0, 10) + '.json',
     JSON.stringify({ exportedAt: new Date().toISOString(), customers, poBatches, poItems }, null, 2), 'application/json');
   poClose('po-export-modal'); poToast('Exported JSON');
 }
 function poExportCSV() {
+  if (!managerGuard(() => poExportCSV())) return;
   const rows = [['Customer', 'Phone', 'Platform', 'Address', 'Model', 'Brand', 'ETA', 'Qty', 'Price', 'Deposit', 'Outstanding', 'Status']];
   poItems.forEach(it => { const c = poCustomerById(it.customerId) || {}; const b = poBatchById(it.batchId) || {};
     rows.push([c.name, c.phone, c.platform, c.address, b.modelName, b.brand, b.eta, it.qty, b.price, it.depositPaid, poItemOutstanding(it), it.status].map(_poCsv)); });
@@ -2464,6 +2503,7 @@ function poExportCSV() {
   poClose('po-export-modal'); poToast('Exported CSV (Excel-friendly)');
 }
 function poExportModelCSV(id) {
+  if (!managerGuard(() => poExportModelCSV(id))) return;
   const b = poBatchById(id); const rows = [['Customer', 'Phone', 'Platform', 'Qty', 'Deposit', 'Outstanding', 'Status']];
   poItemsForBatch(id).forEach(it => { const c = poCustomerById(it.customerId) || {};
     rows.push([c.name, c.phone, c.platform, it.qty, it.depositPaid, poItemOutstanding(it), it.status].map(_poCsv)); });
@@ -2471,8 +2511,10 @@ function poExportModelCSV(id) {
   poToast('Exported customer list');
 }
 function poImport(input) {
+  if (!managerGuard(() => poImport(input))) return;
   const f = input.files[0]; if (!f) return; const r = new FileReader();
   r.onload = e => {
+    if (!window.ManagerAccess?.isManager()) { input.value = ''; poToast('Manager session ended. Sign in and import again.'); return; }
     try {
       const d = JSON.parse(e.target.result);
       if (!Array.isArray(d.customers) || !Array.isArray(d.poBatches) || !Array.isArray(d.poItems)) throw new Error('bad shape');
@@ -2552,7 +2594,7 @@ function _wmProcess(file, logo) {
 }
 function _wmRenderGrid() {
   const g = document.getElementById('wm-grid'); if (!g) return;
-  g.innerHTML = _wmResults.map((r, i) => `<img src="${r.url}" alt="" title="Tap to download" onclick="wmDownloadOne(${i})">`).join('');
+  g.innerHTML = _wmResults.map((r, i) => `<img src="${_esc(_imageSrc(r.url))}" alt="" title="Tap to download" onclick="wmDownloadOne(${i})">`).join('');
   const btn = document.getElementById('wm-dl-btn');
   if (btn) { btn.disabled = !_wmResults.length; btn.textContent = _wmResults.length ? `⬇ Download all (${_wmResults.length})` : '⬇ Download all'; }
 }
@@ -2586,6 +2628,7 @@ function poBatchSettled(id) {
   return poItemsForBatch(id).filter(i => i.status !== 'Cancelled').every(i => i.status === 'Completed');
 }
 function archivePoBatch(id) {
+  if (!managerGuard(() => archivePoBatch(id))) return;
   const b = poBatchById(id); if (!b) return;
   const open = poItemsForBatch(id).filter(i => !['Cancelled', 'Completed'].includes(i.status)).length;
   if (open) { poToast(`Can't archive — ${open} preorder(s) not settled yet`); return; }
@@ -2594,10 +2637,12 @@ function archivePoBatch(id) {
   renderPreorders(); poToast('Batch archived (unarchive from the Archived view)');
 }
 function unarchivePoBatch(id) {
+  if (!managerGuard(() => unarchivePoBatch(id))) return;
   const b = poBatchById(id); if (!b) return;
   b.archived = false; save('POBATCH_UPSERT', b); renderPreorders(); poToast('Batch restored to active');
 }
 function archiveCompletedBatches() {
+  if (!managerGuard(() => archiveCompletedBatches())) return;
   const done = poBatches.filter(b => !b.archived && poBatchIsComplete(b.id));
   if (!done.length) { poToast('No fully-completed batches to archive'); return; }
   poConfirm(`Archive ${done.length} fully-completed batch(es)? They move to the Archived view (still accessible).`, () => {
@@ -2627,7 +2672,7 @@ function renderPoModels() {
     const waiting = its.filter(i => i.status === 'Waiting Stock').length;
     const arrived = its.filter(i => ['Arrived', 'Awaiting Payment', 'Paid', 'Ready To Ship', 'Shipped'].includes(i.status)).length;
     const done = its.filter(i => i.status === 'Completed').length;
-    return `<div class="po-mcard ${poSel.batchId === b.id ? 'sel' : ''}" onclick="poSelectBatch('${b.id}')">
+    return `<div class="po-mcard ${poSel.batchId === b.id ? 'sel' : ''}" onclick="poSelectBatch(${_js(b.id)})">
       <div class="po-mcard-img" ${poImgStyle(b)}>${poImgInner(b)}</div>
       <div class="po-mcard-body"><div class="po-mcard-name">${_esc(b.modelName)}</div>
         <div class="po-mcard-sub">${_esc(b.brand || '')}${b.eta ? ' · ETA ' + _esc(b.eta) : ''}</div>
@@ -2642,8 +2687,8 @@ function renderPoCustomers(q) {
   el.innerHTML = list.map(c => {
     const act = poItemsForCustomer(c.id).filter(poIsActive);
     const out = act.reduce((a, i) => a + poItemOutstanding(i), 0);
-    return `<div class="po-cust-row ${poSel.customerId === c.id ? 'sel' : ''}" onclick="poSelectCustomer('${c.id}')">
-      <div class="po-av">${_poInitials(c.name)}</div>
+    return `<div class="po-cust-row ${poSel.customerId === c.id ? 'sel' : ''}" onclick="poSelectCustomer(${_js(c.id)})">
+      <div class="po-av">${_esc(_poInitials(c.name))}</div>
       <div class="po-cust-main"><div class="po-cust-name">${_esc(c.name)}</div><div class="po-cust-sub">${_esc(c.platform || '')} · ${act.length} active</div></div>
       <div class="po-cust-meta">${out > 0 ? `<span class="po-out">RM ${out.toFixed(0)} due</span>` : '<span style="color:var(--success)">Settled</span>'}</div>
     </div>`;
@@ -2655,7 +2700,7 @@ function renderPoDetail() {
   else if (poSel.batchId) el.innerHTML = poModelDetailHtml(poSel.batchId);
   else el.innerHTML = '<div class="po-empty" style="padding:48px">Select a model or a customer to begin.</div>';
 }
-function poBadge(s) { return `<span class="po-badge ${PO_STATUS_CLASS[s]}">${s}</span>`; }
+function poBadge(s) { return `<span class="po-badge ${_esc(PO_STATUS_CLASS[s] || 'po-st-waiting')}">${_esc(s)}</span>`; }
 function poStepper(status) {
   if (status === 'Cancelled') return `<div style="margin:10px 0">${poBadge('Cancelled')}</div>`;
   const ci = PO_FLOW.indexOf(status);
@@ -2669,20 +2714,20 @@ function poItemActions(it) {
   const id = it.id; const b = [];
   switch (it.status) {
     case 'Arrived':
-      b.push(`<button class="btn btn-warning btn-sm" onclick="poAskStatus('${id}','Awaiting Payment')">Send invoice → Await Pay</button>`);
-      b.push(`<button class="btn btn-success btn-sm" onclick="poAskPaid('${id}')">Mark Paid</button>`); break;
+      b.push(`<button class="btn btn-warning btn-sm" onclick="poAskStatus(${_js(id)},'Awaiting Payment')">Send invoice → Await Pay</button>`);
+      b.push(`<button class="btn btn-success btn-sm" onclick="poAskPaid(${_js(id)})">Mark Paid</button>`); break;
     case 'Awaiting Payment':
-      b.push(`<button class="btn btn-success btn-sm" onclick="poAskPaid('${id}')">Mark Paid</button>`); break;
+      b.push(`<button class="btn btn-success btn-sm" onclick="poAskPaid(${_js(id)})">Mark Paid</button>`); break;
     case 'Ready To Ship':
-      b.push(`<button class="btn btn-ghost btn-sm" onclick="poAskStatus('${id}','Shipped')">Mark Shipped</button>`); break;
+      b.push(`<button class="btn btn-ghost btn-sm" onclick="poAskStatus(${_js(id)},'Shipped')">Mark Shipped</button>`); break;
     case 'Shipped':
-      b.push(`<button class="btn btn-ghost btn-sm" onclick="poAskStatus('${id}','Completed')">Mark Completed</button>`); break;
+      b.push(`<button class="btn btn-ghost btn-sm" onclick="poAskStatus(${_js(id)},'Completed')">Mark Completed</button>`); break;
     case 'Waiting Stock':
       b.push(`<button class="btn btn-outline btn-sm" disabled>Awaiting stock arrival</button>`); break;
   }
   // Step back one phase (confirmed) — replaces the old per-action undo toasts.
-  if (it.status !== 'Waiting Stock') b.push(`<button class="btn btn-outline btn-sm" onclick="poBackStatus('${id}')">↶ Back a step</button>`);
-  if (!['Completed', 'Cancelled'].includes(it.status)) b.push(`<button class="btn btn-danger btn-sm" onclick="poAskCancel('${id}')">Cancel</button>`);
+  if (it.status !== 'Waiting Stock') b.push(`<button class="btn btn-outline btn-sm" onclick="poBackStatus(${_js(id)})">↶ Back a step</button>`);
+  if (!['Completed', 'Cancelled'].includes(it.status)) b.push(`<button class="btn btn-danger btn-sm" onclick="poAskCancel(${_js(id)})">Cancel</button>`);
   return `<div class="po-item-actions">${b.join('')}</div>`;
 }
 function poItemCard(it, full) {
@@ -2691,10 +2736,10 @@ function poItemCard(it, full) {
     <div class="po-item-head">
       <div class="po-thumb" ${poImgStyle(b)}>${poImgInner(b)}</div>
       <div class="po-item-info"><div class="po-item-name">${_esc(b ? b.modelName : '(deleted model)')}</div>
-        <div class="po-item-fin">Qty <b>${it.qty}</b> · RM <b>${poUnitPrice(it).toFixed(0)}</b> · Deposit <b>RM ${(Number(it.depositPaid) || 0).toFixed(0)}</b> · Outstanding <b>RM ${poItemOutstanding(it).toFixed(0)}</b></div></div>
+        <div class="po-item-fin">Qty <b>${_esc(it.qty)}</b> · RM <b>${poUnitPrice(it).toFixed(0)}</b> · Deposit <b>RM ${(Number(it.depositPaid) || 0).toFixed(0)}</b> · Outstanding <b>RM ${poItemOutstanding(it).toFixed(0)}</b></div></div>
       ${poBadge(it.status)}
-      ${poIsActive(it) ? `<button class="po-del-btn" onclick="event.stopPropagation();openEditItem('${it.id}')" title="Edit qty / deposit">✎</button>` : ''}
-      <button class="po-del-btn" onclick="event.stopPropagation();deletePoItem('${it.id}')" title="Delete preorder">🗑</button>
+      ${poIsActive(it) ? `<button class="po-del-btn" onclick="event.stopPropagation();openEditItem(${_js(it.id)})" title="Edit qty / deposit">✎</button>` : ''}
+      <button class="po-del-btn" onclick="event.stopPropagation();deletePoItem(${_js(it.id)})" title="Delete preorder">🗑</button>
     </div>
     ${full ? poStepper(it.status) : ''}
     ${poItemActions(it)}
@@ -2711,14 +2756,14 @@ function poCustomerDetailHtml(id) {
   const elig = its.filter(i => PO_INVOICE_STATUSES.includes(i.status)).length;
   const activeCards = active.map(it => poItemCard(it, true)).join('') || '<div class="po-empty">No active preorders 🎉</div>';
   return `<div class="po-detail-head">
-      <div class="po-av po-av-lg">${_poInitials(c.name)}</div>
+      <div class="po-av po-av-lg">${_esc(_poInitials(c.name))}</div>
       <div style="flex:1;min-width:0"><div class="po-detail-name">${_esc(c.name)}</div>
         <div class="po-detail-sub">${_esc(c.platform || '')} · ${_esc(c.phone || '—')}</div>
         ${c.address ? `<div class="po-detail-sub">📍 ${_esc(c.address)}</div>` : ''}
         ${c.notes ? `<div class="po-detail-sub">📝 ${_esc(c.notes)}</div>` : ''}</div>
       <div class="po-detail-actions">
-        <button class="btn btn-outline btn-sm" onclick="openEditCustomer('${c.id}')">✎ Edit</button>
-        <button class="btn btn-primary btn-sm" onclick="openInvoice('${c.id}')" ${elig ? '' : 'disabled'}>📋 Copy Invoice</button>
+        <button class="btn btn-outline btn-sm" onclick="openEditCustomer(${_js(c.id)})">✎ Edit</button>
+        <button class="btn btn-primary btn-sm" onclick="openInvoice(${_js(c.id)})" ${elig ? '' : 'disabled'}>📋 Copy Invoice</button>
       </div>
     </div>
     <div class="po-summary">
@@ -2741,10 +2786,10 @@ function poModelDetailHtml(id) {
   // the numbers around.
   const rows = its.map(it => {
     const c = poCustomerById(it.customerId);
-    return `<div class="po-wrow" onclick="poSelectCustomer('${it.customerId}')">
-      <div class="po-av">${_poInitials(c ? c.name : '?')}</div>
+    return `<div class="po-wrow" onclick="poSelectCustomer(${_js(it.customerId)})">
+      <div class="po-av">${_esc(_poInitials(c ? c.name : '?'))}</div>
       <div class="po-cust-main"><div class="po-cust-name">${_esc(c ? c.name : '(unknown)')}</div><div class="po-cust-sub">${_esc(c ? c.platform : '')}</div></div>
-      <div class="po-wc">${it.qty}</div>
+      <div class="po-wc">${_esc(it.qty)}</div>
       <div class="po-wc">RM ${(Number(it.depositPaid) || 0).toFixed(0)}</div>
       <div class="po-wc">RM ${poItemOutstanding(it).toFixed(0)}</div>
       <div class="po-wst">${poBadge(it.status)}</div>
@@ -2762,29 +2807,29 @@ function poModelDetailHtml(id) {
         <div class="po-kv-row">
           <div class="po-kv"><span>Price</span>RM ${(Number(b.price) || 0).toFixed(0)}</div>
           <div class="po-kv"><span>Deposit</span>RM ${(Number(b.deposit) || 0).toFixed(0)}</div>
-          <div class="po-kv"><span>Ordered</span>${totQty}</div>
+          <div class="po-kv"><span>Ordered</span>${_esc(totQty)}</div>
           <div class="po-kv"><span>Received</span>
             <span class="po-recv-step">
-              <button onclick="event.stopPropagation();poAdjustReceived('${b.id}',-1)" title="Remove one">−</button>
-              <b>${b.received || 0}</b>
-              <button onclick="event.stopPropagation();poAdjustReceived('${b.id}',1)" title="Add one">+</button>
+              <button onclick="event.stopPropagation();poAdjustReceived(${_js(b.id)},-1)" title="Remove one">−</button>
+              <b>${_esc(b.received || 0)}</b>
+              <button onclick="event.stopPropagation();poAdjustReceived(${_js(b.id)},1)" title="Add one">+</button>
             </span>
           </div>
         </div>
         ${b.notes ? `<div class="po-detail-sub">📝 ${_esc(b.notes)}</div>` : ''}</div>
       <div class="po-detail-actions">
-        <button class="btn btn-primary btn-sm" onclick="openReceive('${b.id}')">📦 Receive Stock</button>
-        <button class="btn btn-ghost btn-sm" onclick="openAddCustomer('${b.id}')">＋ Add Customer</button>
-        <button class="btn btn-warning btn-sm" onclick="poNotify('${b.id}')">🔔 Notify</button>
+        <button class="btn btn-primary btn-sm" onclick="openReceive(${_js(b.id)})">📦 Receive Stock</button>
+        <button class="btn btn-ghost btn-sm" onclick="openAddCustomer(${_js(b.id)})">＋ Add Customer</button>
+        <button class="btn btn-warning btn-sm" onclick="poNotify(${_js(b.id)})">🔔 Notify</button>
         <div class="po-menu-wrap">
-          <button class="btn btn-outline btn-sm" onclick="poToggleMenu(event,'po-menu-${b.id}')">⋯ More</button>
-          <div class="po-menu" id="po-menu-${b.id}">
-            <button onclick="openPost('${b.id}')">📝 Copy post</button>
-            <button onclick="poExportModelCSV('${b.id}')">⬇ Export CSV</button>
+          <button class="btn btn-outline btn-sm" onclick="poToggleMenu(event,${_js('po-menu-' + b.id)})">⋯ More</button>
+          <div class="po-menu" id="po-menu-${_esc(b.id)}">
+            <button onclick="openPost(${_js(b.id)})">📝 Copy post</button>
+            <button onclick="poExportModelCSV(${_js(b.id)})">⬇ Export CSV</button>
             ${b.archived
-              ? `<button onclick="unarchivePoBatch('${b.id}')">📂 Unarchive</button>`
-              : `<button onclick="archivePoBatch('${b.id}')" ${poBatchSettled(b.id) ? '' : 'disabled title="All preorders must be settled first"'}>🗄 Archive</button>`}
-            <button class="danger" onclick="deletePoBatch('${b.id}')">🗑 Delete batch</button>
+              ? `<button onclick="unarchivePoBatch(${_js(b.id)})">📂 Unarchive</button>`
+              : `<button onclick="archivePoBatch(${_js(b.id)})" ${poBatchSettled(b.id) ? '' : 'disabled title="All preorders must be settled first"'}>🗄 Archive</button>`}
+            <button class="danger" onclick="deletePoBatch(${_js(b.id)})">🗑 Delete batch</button>
           </div>
         </div>
       </div>
@@ -2797,7 +2842,7 @@ function poModelDetailHtml(id) {
 function showMsg(id, text, type) {
   const el=document.getElementById(id); if(!el)return;
   if(!text){el.innerHTML='';return;}
-  el.innerHTML=`<div class="msg msg-${type==='err'?'err':'ok'}">${text}</div>`;
+  el.innerHTML=`<div class="msg msg-${type==='err'?'err':'ok'}">${_esc(text)}</div>`;
   if(type==='ok') setTimeout(()=>{if(el)el.innerHTML='';},2800);
 }
 

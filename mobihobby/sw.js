@@ -1,12 +1,13 @@
 // ── MobiHobby POS — service worker ──
 // Caches the app shell so the POS opens instantly and works fully offline
 // from the home screen. Bump CACHE when any shell file changes.
-const CACHE = 'mobihobby-v3';
+const CACHE = 'mobihobby-v4-manager-auth';
 const SHELL = [
   './',
   './index.html',
   './style.css',
   './app.js',
+  './auth.js',
   './sync.js',
   './manifest.webmanifest',
   './assets/logo.png',

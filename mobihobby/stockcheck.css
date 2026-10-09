@@ -1,0 +1,34 @@
+/* Scoped stock-check layout: one item per row, comfortable on mobile. */
+#sc-modal .sc-modal { width:min(880px,96vw); max-width:880px; max-height:90vh; display:flex; flex-direction:column; }
+#sc-modal .sc-heading {display:flex;justify-content:space-between;align-items:center;gap:12px}
+#sc-modal .sc-heading h3 {margin:0}
+#sc-modal .sc-heading button {flex:none}
+#sc-summary {margin:12px 0;font-size:14px;font-weight:600}
+#sc-search-controls {display:flex;gap:8px;margin-bottom:10px}
+#sc-search-controls[hidden] {display:none}
+#sc-search {flex:1;min-width:0}
+#sc-modal input,#sc-modal select {padding:10px;border:1px solid var(--border,#ddd);border-radius:8px;background:var(--bg,#fff);color:var(--text,#222);font-size:16px}
+#sc-body {overflow-y:auto;min-height:0;flex:1}
+#sc-modal .sc-note {font-size:13px;color:var(--text-2);line-height:1.5;margin:0 0 12px}
+#sc-modal .sc-row {display:grid;grid-template-columns:minmax(0,1fr) 110px 92px 100px;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border,#ddd)}
+#sc-modal .sc-product strong {display:block;overflow-wrap:anywhere}
+#sc-modal small {display:block;font-size:12px;color:var(--text-2);margin-top:4px;overflow-wrap:anywhere}
+#sc-modal .sc-expected,#sc-modal .sc-count label {font-size:12px;color:var(--text-2)}
+#sc-modal .sc-expected strong,#sc-modal .sc-count strong {display:block;font-size:20px;color:var(--text);margin-top:4px}
+#sc-modal .sc-count input {display:block;width:100%;box-sizing:border-box;margin-top:4px}
+#sc-modal .sc-result {font-size:13px;color:var(--text-2)}
+#sc-modal .sc-different {font-weight:700;color:var(--blue)}
+#sc-modal .sc-warning,#sc-message {color:#b45309;font-size:13px}
+#sc-message:empty {display:none}
+#sc-message {margin-bottom:10px}
+#sc-modal .sc-conflict {border-left:3px solid #d97706;padding-left:10px}
+#sc-modal .sc-empty {padding:24px 8px;text-align:center;line-height:1.6}
+#sc-actions {margin-top:14px;display:flex;justify-content:space-between;gap:10px}
+#sc-modal button:disabled {opacity:.45;cursor:not-allowed}
+@media(max-width:600px) {
+  #sc-modal .sc-row {grid-template-columns:minmax(0,1fr) 90px;gap:10px}
+  #sc-modal .sc-product {grid-column:1/-1}
+  #sc-modal .sc-result {grid-column:1/-1}
+  #sc-search-controls {flex-direction:column}
+  #sc-actions button {flex:1}
+}

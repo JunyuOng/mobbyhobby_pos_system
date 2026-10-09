@@ -37,13 +37,13 @@ function scOpen() {
   scReviewing = false;
   document.getElementById('sc-search').value = '';
   document.getElementById('sc-filter').value = 'all';
-  document.getElementById('sc-modal').classList.add('show');
+  document.getElementById('sc-modal').classList.add('open');
   scRender();
 }
 function scClose() {
   const active = document.activeElement;
   if (active?.id?.startsWith('sc-count-')) scRecord(Number(active.id.slice(9)),active);
-  document.getElementById('sc-modal').classList.remove('show');
+  document.getElementById('sc-modal').classList.remove('open');
 }
 function scStart() {
   if (!products.length) { poToast('Add inventory before starting a stock check'); return; }
@@ -187,8 +187,8 @@ function scApply() {
   poToast(changes.length ? changes.length + ' stock adjustments saved — check the sync badge for cloud status' : 'Stock check finished — all counted items match');
 }
 window.addEventListener('mh_data_updated', () => {
-  if (document.getElementById('sc-modal')?.classList.contains('show')) scRender();
+  if (document.getElementById('sc-modal')?.classList.contains('open')) scRender();
 });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && document.getElementById('sc-modal')?.classList.contains('show')) scClose();
+  if (event.key === 'Escape' && document.getElementById('sc-modal')?.classList.contains('open')) scClose();
 });

@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="MobiHobby">
 <link rel="apple-touch-icon" href="assets/icon-180.png">
 <link rel="icon" type="image/png" href="assets/icon-192.png">
+<link rel="stylesheet" href="stockcheck.css">
 </head>
 <body>
 
@@ -196,6 +197,7 @@
             <button class="btn btn-outline btn-sm" id="resv-btn" onclick="openReservations()">🔖 Reservations</button>
             <button class="btn btn-outline btn-sm" onclick="openListingModal()">📣 FB Listings</button>
             <button class="btn btn-outline btn-sm" onclick="openImportModal()">⬆ Import CSV</button>
+            <button class="btn btn-outline btn-sm" onclick="scOpen()">✓ Stock check</button>
             <button class="btn btn-outline btn-sm" onclick="exportCSV()">⬇ Export Inventory</button>
             <button class="btn btn-outline btn-sm" onclick="openBackup()">💾 Backup</button>
           </div>
@@ -676,9 +678,20 @@
 
 <div class="po-toast" id="po-toast"><span id="po-toast-msg"></span><button class="po-toast-btn" id="po-toast-undo">↶ Undo</button></div>
 
+<div class="po-ovl" id="sc-modal"><section class="po-modal sc-modal" role="dialog" aria-modal="true" aria-labelledby="sc-title">
+  <div class="sc-heading"><h3 class="po-modal-h" id="sc-title">Stock check</h3><button class="btn btn-outline btn-sm" onclick="scClose()">Save &amp; close</button></div>
+  <p id="sc-summary" role="status"></p>
+  <div id="sc-message" role="alert"></div>
+  <div id="sc-search-controls" hidden>
+    <input id="sc-search" type="search" placeholder="Search name, brand or scan barcode…" aria-label="Search stock check" oninput="scRender()" onkeydown="scScan(event)">
+    <select id="sc-filter" aria-label="Show stock check items" onchange="scRender()"><option value="all">All items</option><option value="remaining">Unchecked items</option><option value="differences">Differences</option></select>
+  </div>
+  <div id="sc-body"></div><div id="sc-actions"></div>
+</section></div>
 <script src="auth.js"></script>
 <script src="sync.js"></script>
 <script src="app.js"></script>
+<script src="stockcheck.js"></script>
 <script>
   // set device ID display
   document.addEventListener('DOMContentLoaded', () => {

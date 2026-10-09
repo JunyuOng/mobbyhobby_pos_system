@@ -1393,7 +1393,7 @@ function editProduct(bc) {
   lookupBarcode();
   poOpen('prod-modal');
 }
-function closeProductModal() { poClose('prod-modal'); clearForm(); }
+function closeProductModal() { poClose('prod-modal'); clearForm(); window.scResumeAfterProduct?.(); }
 let editingBc=null, pendingImg=null;
 function handleImg(input) {
   const file=input.files[0]; if(!file)return;

@@ -31,9 +31,42 @@ function scPersist() {
     return false;
   }
 }
+let scReturnToCheck = false;
+function scRefreshRows() {
+  if (!scDraft) return;
+  for (const p of products) {
+    if (Number(p.stock || 0) > 0 && !scDraft.rows.some(r => r.barcode === p.barcode))
+      scDraft.rows.push({barcode:p.barcode,name:p.name,brand:p.brand || '',
+        expected:Number(p.stock || 0),held:resvUnitsFor(p.barcode),counted:null});
+  }
+}
+function scSearch() {
+  if (document.getElementById('sc-search').value.trim()) document.getElementById('sc-filter').value = 'all';
+  scRefreshRows(); scPersist(); scRender();
+}
+function scAddItem() {
+  const name = document.getElementById('sc-search').value.trim();
+  scClose(); scReturnToCheck = true; openAddProduct();
+  document.getElementById('f-name').value = name;
+}
+function scEditStock(index) {
+  const p = products[index];
+  if (!p) return;
+  scClose(); scReturnToCheck = true; editProduct(p.barcode);
+}
+window.scResumeAfterProduct = function() {
+  if (!scReturnToCheck) return;
+  scReturnToCheck = false; scOpen();
+};
 function scOpen() {
   scStorageText = '';
   scDraft = scRead();
+  if (scDraft) {
+    // Remove uncounted sold-out rows from older drafts; preserve entered counts.
+    scDraft.rows = scDraft.rows.filter(r => r.counted !== null ||
+      Number(products.find(p => p.barcode === r.barcode)?.stock || 0) > 0);
+    scRefreshRows(); scPersist();
+  }
   scReviewing = false;
   document.getElementById('sc-search').value = '';
   document.getElementById('sc-filter').value = 'all';
@@ -46,9 +79,10 @@ function scClose() {
   document.getElementById('sc-modal').classList.remove('open');
 }
 function scStart() {
-  if (!products.length) { poToast('Add inventory before starting a stock check'); return; }
+  const available = products.filter(p => Number(p.stock || 0) > 0);
+  if (!available.length) { poToast('No available stock to check'); return; }
   scDraft = {version:1, id: Date.now().toString(36), started: new Date().toISOString(),
-    rows: products.map(p => ({barcode:p.barcode, name:p.name, brand:p.brand || '',
+    rows: available.map(p => ({barcode:p.barcode, name:p.name, brand:p.brand || '',
       expected:Number(p.stock || 0), held:resvUnitsFor(p.barcode), counted:null}))};
   scReviewing = false;
   scPersist(); scRender();
@@ -79,6 +113,18 @@ function scRecord(index, input) {
   }
   scPersist(); scRender();
 }
+function scStep(index, delta) {
+  if (!scDraft || scReviewing) return;
+  const row = scDraft.rows[index];
+  if (!row) return;
+  const input = document.getElementById('sc-count-' + index);
+  const raw = input?.value;
+  const base = raw !== undefined && raw !== '' && MHStockCheck.validCount(raw) ?
+    Number(raw) : (row.counted === null ? 0 : row.counted);
+  const next = Math.max(0, base + delta);
+  if (!MHStockCheck.validCount(next)) return;
+  scRecord(index, {value:String(next),setCustomValidity(){},reportValidity(){}});
+}
 function scRecount(index) {
   const row = scDraft?.rows[index];
   const p = row && products.find(p => p.barcode === row.barcode);
@@ -92,6 +138,11 @@ function scReview() {
     poToast('Count at least one item first'); return;
   }
   scReviewing = true; scRender();
+}
+function scShowUnchecked() {
+  scReviewing = false;
+  document.getElementById('sc-search').value = '';
+  document.getElementById('sc-filter').value = 'remaining'; scRender();
 }
 function scBack() { scReviewing = false; scRender(); }
 function scScan(event) {
@@ -117,15 +168,20 @@ function scRender() {
     body.innerHTML = '<div class="sc-empty"><p>Count only units available to sell. Keep reserved units aside.</p><p>Progress is saved on this device. Counting does not change inventory.</p><button class="btn btn-primary" onclick="scStart()">Start stock check</button></div>';
     actions.innerHTML = ''; return;
   }
-  const counted = scDraft.rows.filter(r => r.counted !== null);
+  const activeRows = scDraft.rows.filter(r => r.counted !== null ||
+    Number(products.find(p => p.barcode === r.barcode)?.stock || 0) > 0);
+  const counted = activeRows.filter(r => r.counted !== null);
   const differences = counted.filter(r => MHStockCheck.difference(r) !== 0);
   const conflicts = counted.filter(r => MHStockCheck.conflict(r,
     products.find(p => p.barcode === r.barcode), resvUnitsFor(r.barcode)));
-  summary.textContent = counted.length + ' of ' + scDraft.rows.length + ' checked · ' +
-    (scDraft.rows.length - counted.length) + ' remaining · ' + differences.length + ' differences';
+  summary.innerHTML = '<span class="sc-stat">' + counted.length + ' / ' + activeRows.length + ' checked</span>' +
+    '<span class="sc-stat">' + (activeRows.length - counted.length) + ' unchecked</span>' +
+    '<span class="sc-stat">' + differences.length + ' differences</span>';
+  const unchecked = activeRows.filter(r => r.counted === null);
+  const uncheckedUnits = unchecked.reduce((sum,r) => sum + Number(products.find(p=>p.barcode===r.barcode)?.stock || 0),0);
   const query = document.getElementById('sc-search').value.trim().toLowerCase();
   const filter = document.getElementById('sc-filter').value;
-  let visible = scDraft.rows.map((r,i) => ({r,i}));
+  let visible = scDraft.rows.map((r,i) => ({r,i})).filter(({r}) => activeRows.includes(r));
   if (scReviewing) visible = visible.filter(({r}) => r.counted !== null &&
     (MHStockCheck.difference(r) !== 0 || MHStockCheck.conflict(r,
       products.find(p => p.barcode === r.barcode), resvUnitsFor(r.barcode))));
@@ -134,23 +190,32 @@ function scRender() {
       (filter === 'differences' && r.counted !== null && MHStockCheck.difference(r) !== 0)));
   const note = scReviewing ?
     '<p class="sc-note">Only counted items are included. Unchecked items stay unchanged.' +
-    (conflicts.length ? ' Stock changed for ' + conflicts.length + ' item(s). Go back and recount the flagged items before applying.' : '') + '</p>' :
+    (conflicts.length ? ' Stock changed for ' + conflicts.length + ' item(s). Go back and recount the flagged items before applying.' : '') + '</p>' +
+    (unchecked.length ? '<div class="sc-unverified"><strong>' + unchecked.length + ' items still unchecked · ' + uncheckedUnits + ' recorded units unverified</strong><p>These may be missing, but have not been counted. Their stock will not change.</p><button class="btn btn-outline btn-sm" onclick="scShowUnchecked()">Check remaining items</button></div>' : '') :
     '<p class="sc-note">Count available units only. Reserved units are shown separately. Enter 0 if none remain.</p>';
   body.innerHTML = note + (visible.length ? visible.map(({r,i}) => {
     const p = products.find(p => p.barcode === r.barcode);
     const conflict = MHStockCheck.conflict(r,p,resvUnitsFor(r.barcode));
     const diff = MHStockCheck.difference(r);
-    const difference = diff === null ? 'Unchecked' : diff === 0 ? 'Matches' : (diff > 0 ? '+' : '') + diff + ' difference';
+    const difference = diff === null ? 'Not checked' : diff === 0 ? 'Matches' : diff > 0 ? diff + ' extra' : Math.abs(diff) + ' missing';
     return '<div class="sc-row' + (conflict ? ' sc-conflict' : '') + '">' +
+      '<div class="sc-photo">' + (p?.img ? '<img src="' + _esc(_imageSrc(p.img)) + '" alt="' + _esc(r.name) + '" onerror="this.parentElement.textContent=\'🚗\'">' : '🚗') + '</div>' +
       '<div class="sc-product"><strong>' + _esc(r.name) + '</strong><small>' + _esc(r.brand) + ' · ' + _esc(r.barcode) + '</small>' +
       (conflict ? '<small class="sc-warning">' + (p ? 'Stock changed — recount this item' : 'Product removed — start a new check') + '</small>' + (p && !scReviewing ? '<button class="btn btn-outline btn-sm" onclick="scRecount(' + i + ')">Recount</button>' : '') : '') + '</div>' +
-      '<div class="sc-expected">Recorded<strong>' + r.expected + '</strong><small>' + r.held + ' reserved separately</small></div>' +
+      '<div class="sc-expected">Available<strong>' + r.expected + '</strong><small>' + r.held + ' reserved separately</small></div>' +
       '<div class="sc-count"><label for="sc-count-' + i + '">Counted</label>' +
       (scReviewing ? '<strong>' + r.counted + '</strong>' :
+        '<div class="sc-stepper"><button type="button" class="stepper-btn" aria-label="Decrease count for ' + _esc(r.name) + '" onpointerdown="event.preventDefault()" onclick="scStep(' + i + ',-1)">−</button>' +
         '<input id="sc-count-' + i + '" aria-label="Count for ' + _esc(r.name) + '" type="number" min="0" step="1" inputmode="numeric" placeholder="—" value="' +
-        (r.counted === null ? '' : r.counted) + '" onchange="scRecord(' + i + ',this)">') + '</div>' +
+        (r.counted === null ? '' : r.counted) + '" onchange="scRecord(' + i + ',this)">' +
+        '<button type="button" class="stepper-btn" aria-label="Increase count for ' + _esc(r.name) + '" onpointerdown="event.preventDefault()" onclick="scStep(' + i + ',1)">+</button></div>') + '</div>' +
       '<div class="sc-result' + (diff !== null && diff !== 0 ? ' sc-different' : '') + '">' + difference + '</div></div>';
-  }).join('') : '<p class="sc-empty">' + (scReviewing ? 'All counted quantities match. There are no stock differences to apply.' : 'No items match this view.') + '</p>');
+  }).join('') : '<div class="sc-empty">' + (scReviewing ? '<p>All counted quantities match. There are no stock differences to apply.</p>' :
+      '<p>No available items match this view.</p>' +
+      (query ? products.map((p,index) => ({p,index})).filter(({p}) => Number(p.stock || 0) <= 0 &&
+        [p.name,p.brand,p.barcode].some(v => String(v || '').toLowerCase().includes(query))).map(({p,index}) =>
+          '<div class="sc-found"><strong>' + _esc(p.name) + '</strong><small>0 available units</small><button class="btn btn-outline" onclick="scEditStock(' + index + ')">Add stock</button></div>').join('') : '') +
+      '<button class="btn btn-primary" onclick="scAddItem()">＋ Add missing item</button>') + '</div>');
   if (scReviewing) actions.innerHTML = '<button class="btn btn-outline" onclick="scBack()">Back to counting</button>' +
     '<button class="btn btn-primary" onclick="scApply()"' + (conflicts.length ? ' disabled' : '') + '>' +
     (differences.length ? 'Apply ' + differences.length + ' adjustments' : 'Finish check') + '</button>';

@@ -1820,7 +1820,7 @@ function renderListPicker(q) {
   if (photo === 'with') items = items.filter(p => !!p.img);
   if (photo === 'without') items = items.filter(p => !p.img);
   if (!items.length) { el.innerHTML = '<div class="po-empty">No matching in-stock items</div>'; return; }
-  el.innerHTML = items.slice(0, 40).map(p => `
+  el.innerHTML = items.map(p => `
     <div class="list-pick-row" onclick="listAdd(${_js(p.barcode)})">
       ${p.img ? `<img class="thumb" src="${_esc(_imageSrc(p.img))}" alt="">` : '<div class="thumb-ph">🚗</div>'}
       <div style="flex:1;min-width:0"><div class="prod-name">${_esc(p.name)}</div><div class="prod-bc">${_esc(p.brand)} · Stock ${_esc(p.stock)} · ${listFmtPrice(p.price)}</div></div>

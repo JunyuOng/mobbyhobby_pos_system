@@ -1456,6 +1456,7 @@ function saveProduct() {
     poToast('Product added');
   }
   save('PRODUCT_UPSERT', prod);
+  if (!editingBc) window.scAcknowledgeNewProduct?.(prod);
   closeProductModal();
   renderInventory(); renderStats();
 }

@@ -19,7 +19,7 @@ function photoRender() {
   document.getElementById('photo-export').textContent = '⬇ Download selected ZIP (' + photoSelection.size + ')';
   if (!list.length) { grid.innerHTML = '<p>No product photos found.</p>'; return; }
   grid.innerHTML = list.map(p => {
-    const key = encodeURIComponent(p.barcode);
+    const key = encodeURIComponent(p.barcode).replace(/'/g, '%27');
     const selected = photoSelection.has(p.barcode);
     return '<div class="photo-tile"><img alt="" src="' + _esc(_imageSrc(p.img)) + '">' +
       '<div class="photo-tile-name">' + _esc(p.name) + '</div>' +

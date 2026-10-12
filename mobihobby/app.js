@@ -1787,7 +1787,7 @@ let _listBatch = [];   // ordered [{ barcode, posted, num }]
 function openListingModal() {
   _listBatch = [];
   const s = document.getElementById('list-search'); if (s) s.value = '';
-  for (const id of ['list-brand-filter', 'list-scale-filter', 'list-photo-filter']) {
+  for (const id of ['list-brand-filter', 'list-scale-filter', 'list-price-sort']) {
     const el = document.getElementById(id); if (el) el.value = '';
   }
   listRefreshBrandOptions();
@@ -1814,11 +1814,10 @@ function renderListPicker(q) {
   if (query) items = items.filter(p => [p.name,p.brand,p.barcode].some(v => String(v || '').toLowerCase().includes(query)));
   const brand = document.getElementById('list-brand-filter')?.value || '';
   const scale = document.getElementById('list-scale-filter')?.value || '';
-  const photo = document.getElementById('list-photo-filter')?.value || '';
+  const priceSort = document.getElementById('list-price-sort')?.value || '';
   if (brand) items = items.filter(p => p.brand === brand);
   if (scale) items = items.filter(p => p.scale === scale);
-  if (photo === 'with') items = items.filter(p => !!p.img);
-  if (photo === 'without') items = items.filter(p => !p.img);
+  if (priceSort === 'asc' || priceSort === 'desc') items.sort((a,b) => priceSort === 'asc' ? Number(a.price || 0) - Number(b.price || 0) : Number(b.price || 0) - Number(a.price || 0));
   if (!items.length) { el.innerHTML = '<div class="po-empty">No matching in-stock items</div>'; return; }
   el.innerHTML = items.map(p => `
     <div class="list-pick-row" onclick="listAdd(${_js(p.barcode)})">

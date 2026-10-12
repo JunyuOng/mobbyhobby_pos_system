@@ -40,6 +40,17 @@ function scRefreshRows() {
         expected:Number(p.stock || 0),held:resvUnitsFor(p.barcode),counted:null});
   }
 }
+// Only newly created products are auto-counted; existing stock edits still require verification.
+window.scAcknowledgeNewProduct = function(product) {
+  if (!product || !scRead()) return;
+  scDraft = scRead();
+  if (scDraft.rows.some(r => r.barcode === product.barcode)) return;
+  const quantity = Number(product.stock || 0);
+  if (!Number.isSafeInteger(quantity) || quantity <= 0) return;
+  scDraft.rows.push({barcode:product.barcode,name:product.name,brand:product.brand || '',
+    expected:quantity,held:resvUnitsFor(product.barcode),counted:quantity});
+  scPersist();
+};
 function scSearch() {
   if (document.getElementById('sc-search').value.trim()) document.getElementById('sc-filter').value = 'all';
   scRefreshRows(); scPersist(); scRender();

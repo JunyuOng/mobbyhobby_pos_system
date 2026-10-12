@@ -1,13 +1,14 @@
 // ── MobiHobby POS — service worker ──
 // Caches the app shell so the POS opens instantly and works fully offline
 // from the home screen. Bump CACHE when any shell file changes.
-const CACHE = 'mobihobby-v7-stock-check-ui';
+const CACHE = 'mobihobby-v8-photo-library';
 const SHELL = [
   './',
   './index.html',
   './style.css',
   './app.js',
-  './stockcheck.js?v=4',
+  './stockcheck.js?v=5',
+  './photo-library.js?v=1',
   './stockcheck.css?v=4',
   './auth.js',
   './sync.js',

@@ -495,6 +495,15 @@
     <div class="list-col">
       <div class="list-col-title">In-stock items — tap to add</div>
       <input id="list-search" class="po-search" placeholder="Search name / brand / barcode…" autocomplete="off" oninput="listSearch(this.value)">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">
+        <select id="list-brand-filter" aria-label="Filter by brand" onchange="listRefreshFilters()" style="flex:1;min-width:110px"><option value="">All brands</option></select>
+        <select id="list-scale-filter" aria-label="Filter by scale" onchange="listRefreshFilters()" style="flex:1;min-width:95px">
+          <option value="">All scales</option><option value="1:64">1:64</option><option value="1:43">1:43</option><option value="1:18">1:18</option><option value="1:24">1:24</option>
+        </select>
+        <select id="list-photo-filter" aria-label="Filter by photo availability" onchange="listRefreshFilters()" style="flex:1;min-width:115px">
+          <option value="">All photos</option><option value="with">With photo</option><option value="without">Without photo</option>
+        </select>
+      </div>
       <div id="list-picker" class="list-picker"></div>
     </div>
     <div class="list-col">

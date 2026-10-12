@@ -1787,20 +1787,40 @@ let _listBatch = [];   // ordered [{ barcode, posted, num }]
 function openListingModal() {
   _listBatch = [];
   const s = document.getElementById('list-search'); if (s) s.value = '';
+  for (const id of ['list-brand-filter', 'list-scale-filter', 'list-photo-filter']) {
+    const el = document.getElementById(id); if (el) el.value = '';
+  }
+  listRefreshBrandOptions();
   renderListPicker(''); renderListBatch();
   poOpen('listing-modal');
 }
 function listFmtPrice(p) { const n = Number(p) || 0; return 'RM' + (Number.isInteger(n) ? String(n) : n.toFixed(2)); }
 function listingText(item, num) { return `${num}) ${item.name}\nAvailable: ${item.stock}\nPrice: ${listFmtPrice(item.price)}`; }
 
+function listRefreshBrandOptions() {
+  const select = document.getElementById('list-brand-filter');
+  if (!select) return;
+  const brands = [...new Set(products.filter(p => Number(p.stock || 0) > 0).map(p => String(p.brand || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+  select.replaceChildren(new Option('All brands', ''), ...brands.map(brand => new Option(brand, brand)));
+}
+function listRefreshFilters() {
+  renderListPicker(document.getElementById('list-search')?.value || '');
+}
 function renderListPicker(q) {
   const el = document.getElementById('list-picker'); if (!el) return;
   const query = (q || '').toLowerCase().trim();
   const inBatch = new Set(_listBatch.map(b => b.barcode));
   let items = products.filter(p => (p.stock || 0) > 0 && !inBatch.has(p.barcode));
-  if (query) items = items.filter(p => p.name.toLowerCase().includes(query) || p.brand.toLowerCase().includes(query) || p.barcode.toLowerCase().includes(query));
+  if (query) items = items.filter(p => [p.name,p.brand,p.barcode].some(v => String(v || '').toLowerCase().includes(query)));
+  const brand = document.getElementById('list-brand-filter')?.value || '';
+  const scale = document.getElementById('list-scale-filter')?.value || '';
+  const photo = document.getElementById('list-photo-filter')?.value || '';
+  if (brand) items = items.filter(p => p.brand === brand);
+  if (scale) items = items.filter(p => p.scale === scale);
+  if (photo === 'with') items = items.filter(p => !!p.img);
+  if (photo === 'without') items = items.filter(p => !p.img);
   if (!items.length) { el.innerHTML = '<div class="po-empty">No matching in-stock items</div>'; return; }
-  el.innerHTML = items.slice(0, 40).map(p => `
+  el.innerHTML = items.map(p => `
     <div class="list-pick-row" onclick="listAdd(${_js(p.barcode)})">
       ${p.img ? `<img class="thumb" src="${_esc(_imageSrc(p.img))}" alt="">` : '<div class="thumb-ph">🚗</div>'}
       <div style="flex:1;min-width:0"><div class="prod-name">${_esc(p.name)}</div><div class="prod-bc">${_esc(p.brand)} · Stock ${_esc(p.stock)} · ${listFmtPrice(p.price)}</div></div>

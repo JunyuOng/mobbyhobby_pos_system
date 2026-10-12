@@ -505,7 +505,7 @@ tr.inv-oos:hover td{opacity:.85}
 .list-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .list-col{min-width:0}
 .list-col-title{font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
-.list-picker{max-height:44vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.list-picker{max-height:55vh;min-height:160px;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:6px}
 .list-pick-row{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;transition:.12s}
 .list-pick-row:hover{border-color:var(--blue);background:var(--blue-ice)}
 .list-add-btn{font-size:11px;font-weight:700;color:var(--blue);white-space:nowrap;flex-shrink:0}
